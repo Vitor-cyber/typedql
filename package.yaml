@@ -28,6 +28,7 @@ library:
     - -fplugin GHC.TypeLits.KnownNat.Solver
   dependencies:
     - ghc-typelits-knownnat
+    - template-haskell
 
 executables:
   typedql:

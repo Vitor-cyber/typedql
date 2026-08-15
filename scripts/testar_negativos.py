@@ -22,6 +22,7 @@ ESPERADO = {
     "ColunaNulavelSemMaybe.hs": "Maybe Text",
     "LeituraNulavelSemMaybe.hs": "Maybe Text",
     "EvalSemCompilar.hs": "ainda nao foi compilada",
+    "ProjecaoSqlInexistente.hs": "nao existe neste esquema",
 }
 
 
@@ -44,6 +45,8 @@ def compilar(arquivo: pathlib.Path) -> subprocess.CompletedProcess:
             "base",
             "-package",
             "text",
+            "-package",
+            "template-haskell",
             "-outputdir",
             str(RAIZ / ".stack-work" / "negativos"),
             str(arquivo),

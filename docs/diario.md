@@ -473,3 +473,68 @@ Ao fim do modulo 4: 52 testes positivos, 8 negativos, zero warning.
 Classes de erro de runtime eliminadas pelo tipo: coluna inexistente, tipo errado,
 comparacao incompativel, NULL sem tratar, coluna ambigua em juncao, esquema
 incompativel em juncao, execucao de plano nao compilado.
+
+## Modulo 5: Frontend.Static (quasiquoter de SQL)
+
+### A pergunta
+Da para escrever SQL de verdade, com a sintaxe familiar `SELECT ... FROM ... WHERE`,
+e ainda assim ter todas as garantias de tipo dos modulos 1 a 4? A resposta e o
+Template Haskell. O quasiquoter `[sql| ... |]` roda *antes* da compilacao
+propriamente dita: le a string, analisa a gramatica e *gera codigo Haskell* -- as
+mesmas chamadas a `project`, `select`, `colE` que eu escreveria a mao. O GHC entao
+verifica esse codigo gerado exatamente como verificaria o codigo escrito por mim.
+
+### O ponto central: o quasiquoter nao verifica tipos
+Ele so traduz sintaxe. Toda a checagem continua sendo do GHC sobre a `Exp` gerada.
+Se o SQL menciona uma coluna que nao existe, o quasiquoter gera um
+`project (Proxy @'["taxa"]) ...` perfeitamente bem-formado, e e o GHC que rejeita,
+com a *mesma mensagem do modulo 2*. O erro de nome de coluna, que num banco
+tradicional so aparece quando a query roda, aqui aparece ao compilar. O negativo
+`ProjecaoSqlInexistente.hs` prova isso: escrever `SELECT taxa FROM vendorsQ` com
+`taxa` inexistente nao produz erro de runtime, produz um programa que nao existe.
+
+### A implementacao
+Um pipeline curto: `String -> tokens -> arvore -> Exp`.
+- **Tokenizador** manual (`tokeniza`): reconhece `*`, `,`, `=`, identificadores,
+  texto entre aspas e numeros. Erro de lexico vira `Left`.
+- **Parser** descida-recursiva (`analisa`): `SELECT` (`*` ou lista de colunas)
+  `FROM` identificador, `WHERE` opcional (`coluna = literal`). Palavras-chave sem
+  diferenciar maiusculas.
+- **Gerador** (`geraExp`): monta a `Exp` na ordem da semantica SQL -- tabela,
+  depois `select` (WHERE), depois `project` (SELECT). A lista de colunas vira
+  `Proxy :: Proxy '["c1", "c2"]` (ponte para o nivel de tipos). O literal de texto
+  vira `ELit (T.pack "...")`; inteiro e fracionario ficam polimorficos para o GHC
+  unificar com o tipo da coluna.
+
+O nome depois de `FROM` e um identificador Haskell em escopo: `VarE (mkName tabela)`.
+O quasiquoter nao inventa a tabela, ele referencia a `Query` que eu ja defini
+(`vendorsQ`). `mkName` gera um nome nao-higienico que resolve no ponto do splice,
+entao um `let vendorsQ = ...` no mesmo bloco funciona.
+
+### Dificuldades e surpresas
+- **`TemplateHaskellQuotes` vs `TemplateHaskell`.** Usei `TemplateHaskellQuotes`
+  (mais restrito, so habilita as aspas `'nome` e `''Tipo`, nao splices). Basta,
+  porque o modulo *define* o quasiquoter, quem *usa* e que precisa de `QuasiQuotes`.
+  Isso evita o custo de habilitar TH completo na biblioteca.
+- **`Q` fora do escopo.** O import inicial de `Language.Haskell.TH` esqueceu `Q`,
+  dando GHC-76037. `compilaSql :: String -> Q Exp` precisa de `Q` explicito na
+  lista de import.
+- **Aspas duplas no literal renderizado.** `renderExpr` faz `ELit x -> show x`, e
+  `show` de `Text` usa aspas duplas. Entao `WHERE vendor_code = "VFAKE"` renderiza
+  como `(vendor_code = "VFAKE")`, nao com aspas simples de SQL. O teste de
+  `renderSQL` teve que refletir isso.
+- **Splice TH exige a lib registrada.** Rodar o negativo com `ghc -package typedql`
+  so funciona depois de `stack build` registrar `typedql` no pkgdb local. Matar um
+  build no passo copy/register deixa o pkgdb vazio e quebra o splice.
+
+### Testes que passaram a existir
+- Grupo `Frontend.Static` no Spec: `SELECT *`, projecao de lista, `WHERE` com texto,
+  `WHERE` com numero, equivalencia com a algebra escrita a mao, e o formato do
+  `renderSQL` do plano gerado. 6 casos.
+- `negativos/ProjecaoSqlInexistente.hs`: coluna inexistente via SQL, rejeitada com
+  `TypedQL: a coluna "taxa" nao existe neste esquema.`
+
+### Contagem parcial
+Ao fim do modulo 5: 58 testes positivos, 9 negativos, zero warning. O frontend de
+SQL nao abriu nenhuma brecha: toda garantia dos modulos anteriores atravessa o
+quasiquoter, porque ele so gera o codigo que o GHC ja sabia verificar.

@@ -3,6 +3,7 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE StandaloneKindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
 {-# OPTIONS_GHC -Wno-unticked-promoted-constructors #-}
 
 module Main (main) where
@@ -13,6 +14,7 @@ import Test.Tasty
 import Test.Tasty.HUnit
 import TypedQL.Algebra
 import TypedQL.Expr
+import TypedQL.Frontend.Static (sql)
 import TypedQL.Row
 import TypedQL.Schema
 
@@ -55,6 +57,12 @@ campanhas =
 -- Condicao de juncao: vendor_code = camp_vendor.
 joinCond :: Predicate (Append Vendors Campanhas)
 joinCond = EEq (colE @"vendor_code") (colE @"camp_vendor")
+
+-- | Tabela em escopo, referenciada pelo quasiquoter em @FROM vendorsQ@.
+-- O quasiquoter nao inventa a tabela: gera @VarE (mkName "vendorsQ")@, que
+-- resolve para este binding.
+vendorsQ :: Query Logical Vendors
+vendorsQ = fromTable "vendors" tabelaVendors
 
 -- Teste de nivel de tipos: Append junta esquemas na ordem certa.
 appendJuntaEsquemas ::
@@ -253,5 +261,26 @@ main = defaultMain $ testGroup "TypedQL"
       , testCase "renderSQL produz SQL com WHERE" $
           let q = select (EIsNull (colE @"cnpj" :: Expr Vendors TText Nullable)) (fromTable "vendors" tabelaVendors)
           in renderSQL q @?= "SELECT * FROM (vendors) WHERE (cnpj IS NULL)"
+      ]
+  , testGroup "Frontend.Static (quasiquoter SQL)"
+      [ testCase "SELECT * traz todas as linhas" $
+          length (eval (compile [sql| SELECT * FROM vendorsQ |])) @?= 2
+      , testCase "SELECT lista projeta as colunas pedidas" $
+          map (col @"vendor_code") (eval (compile [sql| SELECT vendor_code FROM vendorsQ |]))
+            @?= ["VFAKE", "FAKEV"]
+      , testCase "WHERE com literal de texto filtra" $
+          map (col @"vendor_code") (eval (compile [sql| SELECT vendor_code FROM vendorsQ WHERE vendor_code = "VFAKE" |]))
+            @?= ["VFAKE"]
+      , testCase "WHERE com literal numerico filtra" $
+          map (col @"vendor_code") (eval (compile [sql| SELECT vendor_code FROM vendorsQ WHERE defeitos = 17 |]))
+            @?= ["VFAKE"]
+      , testCase "SQL equivale a algebra escrita a mao" $
+          map (col @"vendor_code") (eval (compile [sql| SELECT vendor_code FROM vendorsQ WHERE vendor_code = "VFAKE" |]))
+            @?= map (col @"vendor_code")
+                  (eval (compile (project (Proxy @'["vendor_code"])
+                                          (select (EEq (colE @"vendor_code") (ELit "VFAKE")) vendorsQ))))
+      , testCase "renderSQL do plano gerado tem WHERE e projecao" $
+          renderSQL [sql| SELECT vendor_code FROM vendorsQ WHERE vendor_code = "VFAKE" |]
+            @?= "SELECT vendor_code FROM (SELECT * FROM (vendors) WHERE (vendor_code = \"VFAKE\"))"
       ]
   ]

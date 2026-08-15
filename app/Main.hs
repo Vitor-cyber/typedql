@@ -3,6 +3,7 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE StandaloneKindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
 {-# OPTIONS_GHC -Wno-unticked-promoted-constructors #-}
 
 module Main (main) where
@@ -11,6 +12,7 @@ import Data.Proxy (Proxy (..))
 import qualified Data.Text as T
 import TypedQL.Algebra
 import TypedQL.Expr
+import TypedQL.Frontend.Static (sql)
 import TypedQL.Row
 import TypedQL.Schema
 
@@ -156,6 +158,27 @@ main = do
   let linhasLeft = eval (compile planoLeft)
   putStrLn ("Resultado (" ++ show (length linhasLeft) ++ " linhas; FAKEV aparece com camp_id=Nothing):")
   mapM_ (\r -> putStrLn ("  vendor=" ++ T.unpack (col @"vendor_code" r) ++ ", camp_id=" ++ show (col @"camp_id" r))) linhasLeft
+  putStrLn ""
+
+  putStrLn "--- modulo 5: Frontend.Static ---"
+  putStrLn ""
+  putStrLn "O quasiquoter le SQL de verdade e gera a consulta tipada em compile time."
+  putStrLn "O que voce escreve como texto vira as mesmas chamadas a project/select/colE,"
+  putStrLn "e o GHC verifica tudo. SQL com coluna inexistente nao compila."
+  putStrLn ""
+  let vendorsQ = fromTable "vendors" tabelaVendors
+      planoSql = [sql| SELECT vendor_code, open_rate FROM vendorsQ WHERE vendor_code = "VFAKE" |]
+  putStrLn "  [sql| SELECT vendor_code, open_rate FROM vendorsQ WHERE vendor_code = 'VFAKE' |]"
+  putStrLn ("  vira (SQL): " ++ renderSQL planoSql)
+  let linhasSql = eval (compile planoSql)
+  putStrLn ("  Resultado (" ++ show (length linhasSql) ++ " linhas):")
+  mapM_ (\r -> putStrLn ("    vendor=" ++ T.unpack (col @"vendor_code" r) ++ ", open_rate=" ++ show (col @"open_rate" r))) linhasSql
+  putStrLn ""
+  putStrLn "Filtro numerico, mesma sintaxe:"
+  let planoNum = [sql| SELECT vendor_code FROM vendorsQ WHERE defeitos = 17 |]
+  putStrLn ("  [sql| SELECT vendor_code FROM vendorsQ WHERE defeitos = 17 |]")
+  putStrLn ("  vira (SQL): " ++ renderSQL planoNum)
+  putStrLn ("  Resultado: " ++ show (map (T.unpack . col @"vendor_code") (eval (compile planoNum))))
 
 mostraColuna :: (String, SqlType, Nullability) -> IO ()
 mostraColuna (nome, tipo, nulabilidade) =

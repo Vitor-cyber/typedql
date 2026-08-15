@@ -45,9 +45,12 @@ esperada (um import errado tambem faria a compilacao falhar). Saida atual:
 [OK] TipoErrado.hs                Couldn't match type 'TDouble' with 'TInt'
 [OK] EvalSemCompilar.hs           TypedQL: esta consulta ainda nao foi compilada.
                                   Aplique compile antes de executar.
+[OK] ProjecaoSqlInexistente.hs    TypedQL: a coluna "taxa" nao existe neste
+                                  esquema. (via quasiquoter: o SQL gera project
+                                  @'["taxa"] e o GHC rejeita.)
 ```
 
-8 de 8 rejeitados corretamente.
+9 de 9 rejeitados corretamente.
 
 ## Estado
 
@@ -55,7 +58,7 @@ esperada (um import errado tambem faria a compilacao falhar). Saida atual:
 - [x] Modulo 2: Row (lista heterogenea indexada pelo esquema, acesso por prova)
 - [x] Modulo 3: Expr (expressoes tipadas, nulabilidade calculada, WHERE total)
 - [x] Modulo 4: Algebra (algebra relacional com estagios)
-- [ ] Modulo 5: Frontend estatico (quasiquoter)
+- [x] Modulo 5: Frontend estatico (quasiquoter [sql| ... |] que gera a consulta tipada em compile time)
 - [ ] Modulo 6: Frontend dinamico (existenciais e singletons)
 - [ ] Modulo 7: Optimize (catamorfismo)
 - [ ] Modulo 8: Engine (executor indexado)
