@@ -43,16 +43,18 @@ esperada (um import errado tambem faria a compilacao falhar). Saida atual:
 [OK] LeituraNulavelSemMaybe.hs    Couldn't match type 'Maybe Text' with 'Text'
                                   Actual: Slot (ColumnOf "cnpj" Vendors)
 [OK] TipoErrado.hs                Couldn't match type 'TDouble' with 'TInt'
+[OK] EvalSemCompilar.hs           TypedQL: esta consulta ainda nao foi compilada.
+                                  Aplique compile antes de executar.
 ```
 
-7 de 7 rejeitados corretamente.
+8 de 8 rejeitados corretamente.
 
 ## Estado
 
 - [x] Modulo 1: Schema (esquema no nivel de tipos, singletons a mao)
 - [x] Modulo 2: Row (lista heterogenea indexada pelo esquema, acesso por prova)
 - [x] Modulo 3: Expr (expressoes tipadas, nulabilidade calculada, WHERE total)
-- [ ] Modulo 4: Algebra (algebra relacional com estagios)
+- [x] Modulo 4: Algebra (algebra relacional com estagios)
 - [ ] Modulo 5: Frontend estatico (quasiquoter)
 - [ ] Modulo 6: Frontend dinamico (existenciais e singletons)
 - [ ] Modulo 7: Optimize (catamorfismo)

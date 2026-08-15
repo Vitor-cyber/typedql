@@ -374,3 +374,102 @@ erro de runtime que deixaram de existir sao quatro: coluna inexistente, tipo
 errado de coluna, comparacao entre tipos incompativeis, e uso de valor
 possivelmente ausente sem trata-lo. O custo medido, por enquanto, e verbosidade de
 aplicacao de tipos no avaliador, concentrada em quatro funcoes auxiliares.
+
+## Modulo 4: Algebra
+
+### O problema
+Os tres modulos anteriores descrevem como o dado e: o esquema (modulo 1), uma
+linha (modulo 2), e uma expressao sobre essa linha (modulo 3). Nenhum deles
+descreve como chegar ao dado. O modulo 4 e a algebra relacional: selecao,
+projecao e juncao como operacoes verificadas em compile time.
+
+Ha duas perguntas. Primeira: e possivel verificar em compile time que a projecao
+escolhe colunas que existem, que a juncao nao produz nomes ambiguos, e que o
+resultado tem o esquema certo? Segunda: e possivel distinguir um plano logico
+(arvore de operacoes tal como o usuario escreveu) de um plano fisico (pronto para
+executar), de forma que chamar o executor num plano nao compilado seja um erro de
+compilacao?
+
+### A solucao e por que ela funciona
+A primeira pergunta ja estava quase respondida: ColumnOf, Disjoint, Append e
+MakeNullable eram o vocabulario. O modulo 4 liga isso num GADT de plano:
+
+```haskell
+type QueryNode :: Schema -> Type
+data QueryNode s where
+  Table  :: String -> [Row s] -> QueryNode s
+  Filter :: Predicate s -> QueryNode s -> QueryNode s
+  Pick   :: (ProjectRow ns s, KnownSymbols ns)
+         => Proxy ns -> QueryNode s -> QueryNode (Project ns s)
+  Join   :: Disjoint l r
+         => Predicate (Append l r) -> QueryNode l -> QueryNode r -> QueryNode (Append l r)
+  LJoin  :: (Disjoint l r, NullRow r, ToNullable r)
+         => Predicate (Append l r) -> QueryNode l -> QueryNode r
+         -> QueryNode (Append l (MakeNullable r))
+```
+
+Cada construtor carrega as restricoes que a avaliacao vai precisar -- o mesmo
+mecanismo de GADT como dicionario do modulo 3. Se os nomes da juncao colidirem,
+a restricao Disjoint nao resolve e o programa nao existe. Se o esquema resultante
+for diferente do esperado, o indice de QueryNode nao unifica. Nao ha verificacao
+em runtime: o compilador ja fez tudo.
+
+Para LEFT JOIN, o predicado e escrito sobre o esquema nao-nulavel do lado direito
+(Append l r), porque ele e avaliado contra as linhas reais. Linhas sem
+correspondencia recebem um Row preenchido com Nothing (nullRow), e as que casaram
+passam por toNullable (embrulha cada valor em Just). Esse ponto e onde MakeNullable
+do modulo 1 paga sua existencia: o tipo do resultado, Append l (MakeNullable r),
+e calculado automaticamente.
+
+A segunda pergunta e o estagio fantasma:
+
+```haskell
+data Stage = Logical | Physical
+
+newtype Query (st :: Stage) (s :: Schema) = UnsafeQuery (QueryNode s)
+
+compile :: Query Logical s -> Query Physical s
+compile (UnsafeQuery q) = UnsafeQuery q  -- identidade em runtime
+
+eval :: CanExecute st => Query st s -> [Row s]
+```
+
+Em runtime Logical e Physical sao o mesmo bit pattern: compile e uma identidade.
+A diferenca e so de tipo, e e o suficiente para que eval nao aceite um plano
+logico -- a instancia CanExecute Logical tem um TypeError, igual a Total do
+modulo 3. O modulo 7 vai substituir compile por uma passagem de otimizacao real.
+
+### Dificuldades e surpresas
+- **appendRow como funcao simples, sem typeclass.** A primeira tentativa usou uma
+  typeclass AppendRow s1 s2, com duas instancias. Nao e necessario. Quando o GHC
+  casa o padrao GADT de Row (RNil ou RCons), ele sabe que s1 e '[] ou c : s1', e
+  Append reduz diretamente. A funcao simples `appendRow :: Row s1 -> Row s2 -> Row
+  (Append s1 s2)` compila sem nenhum helper adicional.
+- **Anotar o predicado do LJoin nao funciona.** A tentativa `LJoin (p :: Predicate
+  (Append l r)) ql qr` introduz skolems l e r novos, que o GHC nao consegue
+  unificar com os existenciais l1 e r1 do GADT porque Append nao e injetiva. O
+  GHC sabe que p :: Predicate (Append l1 r1) e que queremos Predicate (Append l
+  r), mas sem injetividade nao pode concluir Append l r ~ Append l1 r1.
+  A correcao foi anotar os sub-nos: `LJoin p (ql :: QueryNode l) (qr :: QueryNode
+  r)`. QueryNode e um GADT injetivo no indice, entao l ~ l1 e r ~ r1 resolvem
+  trivialmente, e p ganha o tipo certo via unificacao. Regra que vale generalizar:
+  **para nomear existenciais escondidos atras de familias nao injetivas, anote o
+  argumento cujo tipo e direto**.
+- **CR no lugar de backslash no patch Python.** Em strings Python, `` e um
+  retorno de carro (0x0D), nao backslash + r. Para escrever um lambda Haskell
+  `\r ->` num arquivo via Python, o patch precisa de `\\r ->` no codigo-fonte
+  Python (quatro barras). Ou melhor: fazer o patch em bytes (`b"\r ->"`) para
+  evitar a dupla interpretacao. O bug causou erros de parse no GHC que so
+  apareceram na compilacao do executavel, nao da biblioteca -- mais um caso onde
+  o teste negativo (ou neste caso o build) e o que expoe o problema.
+
+### Testes negativos que passaram a existir
+- `negativos/EvalSemCompilar.hs` chama `eval` diretamente em `fromTable`, sem
+  passar por `compile`. Rejeitado com:
+  `TypedQL: esta consulta ainda nao foi compilada. Aplique compile antes de executar.`
+
+### Contagem parcial
+Ao fim do modulo 4: 52 testes positivos, 8 negativos, zero warning.
+Classes de erro de runtime eliminadas pelo tipo: coluna inexistente, tipo errado,
+comparacao incompativel, NULL sem tratar, coluna ambigua em juncao, esquema
+incompativel em juncao, execucao de plano nao compilado.
