@@ -78,4 +78,91 @@ Os instaladores do Stack e do Git via winget reportaram sucesso mas nao
 escreveram nada em disco (bloqueio de endpoint protection em maquina
 corporativa). A solucao foi usar os binarios portateis, extraidos em
 `C:\Users\marvitox\haskell`. Vale registrar porque afeta a reprodutibilidade:
-o projeto compila com Stack 3.11.1 e GHC 9.6.6, snapshot lts-22.43.
+o projeto compila com Stack 3.11.1 e GHC 9.6.7, snapshot lts-22.44.
+
+## Modulo 2: Row
+
+### O problema
+O modulo 1 descreve o esquema, mas nao guarda dado nenhum. Falta a linha. Uma
+linha tem um problema chato: cada posicao tem um tipo diferente. Uma lista comum
+`[a]` exige que todos os elementos tenham o mesmo tipo, e a saida usual em
+linguagem sem tipos dependentes e usar um dicionario de `Any` ou uma uniao
+(`Value = VInt Int | VText Text | ...`), o que devolve o problema para o runtime:
+todo acesso vira um `case` com um caso de falha.
+
+A pergunta do modulo: e possivel uma lista heterogenea cujo tipo de cada posicao
+seja ditado pelo esquema, e um acesso por nome de coluna que nao tenha caso de
+falha?
+
+### A solucao e por que ela funciona
+1. `Row s` e um GADT indexado pelo esquema:
+
+   ```haskell
+   data Row s where
+     RNil  :: Row '[]
+     RCons :: Interp t -> Row s -> Row ((n := t) : s)
+   ```
+
+   Cada `RCons` carrega um valor de tipo `Interp t`, ou seja, o tipo Haskell que
+   o esquema manda. Trocar a ordem das colunas ou o tipo de uma delas nao
+   compila. E a mesma forma do `Stack` da lista 07: o indice do tipo cresce junto
+   com a estrutura.
+
+2. Acesso por nome vira uma **prova**, nao uma busca:
+
+   ```haskell
+   data Index n t s where
+     Here  :: Index n t ((n := t) : s)
+     There :: Index n t s -> Index n t (c : s)
+   ```
+
+   `Index n t s` e um valor que so pode ser construido se a coluna `n`, de tipo
+   `t`, realmente estiver em `s`. `getAt` consome essa prova andando na linha, e
+   **nao tem caso de falha**: os dois padroes cobrem tudo, porque a prova diz que
+   a coluna existe. Ausencia de coluna deixa de ser um erro de runtime e passa a
+   ser um programa que nao existe.
+
+3. `KnownIndex` constroi a prova por inducao nas instancias: a instancia base
+   casa quando a cabeca do esquema e a coluna procurada, a instancia
+   `OVERLAPPABLE` anda uma posicao e recorre. E a mesma tecnica de `KnownNat`,
+   com a resolucao de instancias fazendo o papel da recursao.
+
+4. `col @"open_rate" linha` esconde tudo isso. Custo em runtime: zero, a prova e
+   apagada na compilacao (o codigo gerado e o mesmo de um acesso posicional).
+
+5. `SSchema` e o singleton do esquema inteiro, necessario para percorrer uma
+   linha generica: o esquema foi apagado pelo compilador, o singleton e a copia
+   que sobrevive. `header` reflete o esquema de volta para valores comuns
+   (`[(String, SqlType)]`), e `showRow` usa a restricao `All Show` do modulo 1
+   para renderizar a linha sem enumerar as colunas.
+
+6. `SomeRow` + `withRow` fecham o modulo com o existencial, preparando o modulo 6
+   (esquema descoberto na leitura do CSV).
+
+### Dificuldades e surpresas
+- A primeira versao de `Index` tinha assinatura
+  `getAt :: Index n s -> Row s -> Interp (TypeOf n s)`, sem o `t` no indice. Nao
+  compila: no caso recursivo o GHC tem um esquema abstrato `c : s` e nao sabe
+  decidir se `c` e ou nao a coluna procurada, entao as duas equacoes de `Lookup`
+  ficam empatadas e a familia nao reduz. A correcao foi **carregar o tipo na
+  prova** (`Index n t s`). Licao geral: quando a familia de tipos travar, mova a
+  informacao para o indice do GADT. A prova sabe o que a familia teria que
+  calcular.
+- A dependencia funcional `| n s -> t` e o que permite escrever
+  `col @"open_rate" linha` sem anotar o tipo do resultado. Sem ela `t` fica
+  ambiguo, porque nao aparece nos argumentos.
+- `AllowAmbiguousTypes` e necessario em `col` porque `n` so aparece na restricao.
+  `TypeApplications` e o que torna a funcao usavel.
+- Dois tropecos de compilacao que nada tem a ver com teoria de tipos, mas valem
+  registro: `Text` de `Data.Text` colide com o construtor `Text` de
+  `ErrorMessage` (em posicao de tipo o GHC prefere o tipo, entao a mensagem de
+  erro quebra); e `-Wall` mais assinatura de kind autonoma exigem `RankNTypes`
+  explicito, porque nao ha default-extensions no `package.yaml`.
+
+### Testes negativos que passaram a existir
+`negativos/AcessoAColunaInexistente.hs` pede `col @"taxa"` num esquema que so tem
+`vendor_code` e `open_rate`. O GHC responde
+`No instance for (KnownIndex "taxa" TText '[])`: a busca por inducao chegou ao
+fim da lista sem achar. O script `scripts/testar_negativos.py` agora confere
+tambem **a mensagem**, nao so o fato de a compilacao falhar, porque um import
+errado tambem faria o teste passar por acidente.

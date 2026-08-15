@@ -3,10 +3,31 @@
 # For more information, please see the documentation at:
 #   https://docs.haskellstack.org/en/stable/topics/lock_files
 
-packages: []
+packages:
+- completed:
+    hackage: ghc-typelits-knownnat-0.8.4@sha256:40842155a260424a3a98a99dd1a528d384a187319bdadbd23553f708802f2260,5993
+    pantry-tree:
+      sha256: a2e17c341bd938de5eab70b4b836eaa80dfc84d5c1150d20ab926bb34647948a
+      size: 678
+  original:
+    hackage: ghc-typelits-knownnat-0.8.4
+- completed:
+    hackage: ghc-typelits-natnormalise-0.9.6@sha256:cf48a5cd0e4df189f422a3ff37ee1eb901762b93ed8d8fd60d7260da1b9c9d78,3969
+    pantry-tree:
+      sha256: db1f941c440610375e4e0cdc855fd4c37f65ade020d7a68f3f849ee3813da744
+      size: 757
+  original:
+    hackage: ghc-typelits-natnormalise-0.9.6
+- completed:
+    hackage: ghc-tcplugin-api-0.19.0.0@sha256:72d1bbfdfd025d03a45cb9e9a7d7bc257276b3fa01f6778e052bed018129859c,5410
+    pantry-tree:
+      sha256: 89a867f70303f6b72d68f244cd34d3125523c5beeea22d25e797661cbc615678
+      size: 575
+  original:
+    hackage: ghc-tcplugin-api-0.19.0.0
 snapshots:
 - completed:
-    sha256: 08bd13ce621b41a8f5e51456b38d5b46d7783ce114a50ab604d6bbab0d002146
-    size: 720271
-    url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/22/43.yaml
-  original: lts-22.43
+    sha256: 238fa745b64f91184f9aa518fe04bdde6552533d169b0da5256670df83a0f1a9
+    size: 721141
+    url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/22/44.yaml
+  original: lts-22.44

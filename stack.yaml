@@ -1,5 +1,10 @@
-snapshot: lts-22.43
+# Mesmo ambiente das listas da disciplina.
+resolver: lts-22.44
+
 packages:
 - .
-extra-deps: []
 
+extra-deps:
+- ghc-typelits-knownnat-0.8.4
+- ghc-typelits-natnormalise-0.9.6
+- ghc-tcplugin-api-0.19.0.0

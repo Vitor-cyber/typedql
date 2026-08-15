@@ -1,4 +1,4 @@
-"""Testa que os arquivos em negativos/ NAO compilam, e mostra a mensagem do GHC.
+"""Testa que os arquivos em negativos/ NAO compilam, e pelo motivo certo.
 
 Uso: python scripts/testar_negativos.py
 """
@@ -11,6 +11,15 @@ import sys
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 STACK = shutil.which("stack") or "C:/Users/marvitox/haskell/bin/stack.exe"
 
+# Nao basta o arquivo ser rejeitado: ele tem que ser rejeitado pelo motivo certo.
+# Um import errado tambem faria o GHC falhar, e o teste passaria por acidente.
+ESPERADO = {
+    "ColunaInexistente.hs": "nao existe neste esquema",
+    "AcessoAColunaInexistente.hs": "KnownIndex",
+    "JuncaoAmbigua.hs": "juncao ambigua",
+    "TipoErrado.hs": "TDouble",
+}
+
 
 def compilar(arquivo: pathlib.Path) -> subprocess.CompletedProcess:
     return subprocess.run(
@@ -22,7 +31,6 @@ def compilar(arquivo: pathlib.Path) -> subprocess.CompletedProcess:
             "--",
             "ghc",
             "-fno-code",
-            "-XGHC2021",
             # usa a biblioteca ja compilada, para que o erro venha do arquivo
             # negativo e nao de recompilar src/ sem as extensoes do package.yaml
             "-package",
@@ -30,6 +38,8 @@ def compilar(arquivo: pathlib.Path) -> subprocess.CompletedProcess:
             "-hide-all-packages",
             "-package",
             "base",
+            "-package",
+            "text",
             "-outputdir",
             str(RAIZ / ".stack-work" / "negativos"),
             str(arquivo),
@@ -49,19 +59,30 @@ def main() -> int:
     falhas = []
     for arquivo in arquivos:
         res = compilar(arquivo)
+        saida = res.stdout + res.stderr
+        esperado = ESPERADO.get(arquivo.name)
+
         if res.returncode == 0:
             falhas.append(arquivo.name)
             print(f"[RUIM]  {arquivo.name}: compilou, mas deveria falhar")
             continue
-        print(f"[OK]    {arquivo.name}: rejeitado pelo GHC")
-        for linha in (res.stdout + res.stderr).splitlines():
+        if esperado is None:
+            falhas.append(arquivo.name)
+            print(f"[RUIM]  {arquivo.name}: sem mensagem esperada em ESPERADO")
+        elif esperado not in saida:
+            falhas.append(arquivo.name)
+            print(f"[RUIM]  {arquivo.name}: falhou, mas nao por {esperado!r}")
+        else:
+            print(f"[OK]    {arquivo.name}: rejeitado por {esperado!r}")
+
+        for linha in saida.splitlines():
             if linha.strip():
                 print("        " + linha)
         print()
 
     total = len(arquivos)
     if falhas:
-        print(f"{len(falhas)} de {total} deveriam falhar e nao falharam: {falhas}")
+        print(f"{len(falhas)} de {total} nao passaram: {falhas}")
         return 1
     print(f"{total} de {total} rejeitados corretamente.")
     return 0

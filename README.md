@@ -16,28 +16,32 @@ stack test                                 # testes de valor e de tipo
 python scripts/testar_negativos.py         # consultas que NAO devem compilar
 ```
 
-Requer Stack 3.11.1 e GHC 9.6.6 (snapshot lts-22.43). O `stack` baixa o GHC
+Requer Stack 3.11.1 e GHC 9.6.7 (snapshot lts-22.44). O `stack` baixa o GHC
 sozinho na primeira execucao.
 
 ### Os testes negativos
 
 A garantia central do projeto e negativa: certas consultas nao existem como
 programa valido. `scripts/testar_negativos.py` compila cada arquivo de
-`negativos/` e falha se algum deles compilar. Saida atual:
+`negativos/`, falha se algum compilar e tambem confere se a mensagem do GHC e a
+esperada (um import errado tambem faria a compilacao falhar). Saida atual:
 
 ```
-[OK] ColunaInexistente.hs  TypedQL: a coluna "vendor_cod" nao existe neste esquema.
-                           Colunas disponiveis: ["vendor_code", "vendor_name",
-                                                 "open_rate", "defeitos"]
-[OK] JuncaoAmbigua.hs      TypedQL: juncao ambigua, a coluna "vendor_code"
-                           aparece nos dois lados.
-[OK] TipoErrado.hs         Couldn't match type 'TDouble' with 'TInt'
+[OK] AcessoAColunaInexistente.hs  No instance for (KnownIndex "taxa" TText '[])
+[OK] ColunaInexistente.hs         TypedQL: a coluna "vendor_cod" nao existe neste
+                                  esquema. Colunas disponiveis: ["vendor_code",
+                                  "vendor_name", "open_rate", "defeitos"]
+[OK] JuncaoAmbigua.hs             TypedQL: juncao ambigua, a coluna "vendor_code"
+                                  aparece nos dois lados.
+[OK] TipoErrado.hs                Couldn't match type 'TDouble' with 'TInt'
 ```
+
+4 de 4 rejeitados corretamente.
 
 ## Estado
 
 - [x] Modulo 1: Schema (esquema no nivel de tipos, singletons a mao)
-- [ ] Modulo 2: Row (lista heterogenea indexada pelo esquema)
+- [x] Modulo 2: Row (lista heterogenea indexada pelo esquema, acesso por prova)
 - [ ] Modulo 3: Expr (expressoes tipadas com nulabilidade)
 - [ ] Modulo 4: Algebra (algebra relacional com estagios)
 - [ ] Modulo 5: Frontend estatico (quasiquoter)

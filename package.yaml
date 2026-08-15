@@ -3,46 +3,31 @@ version:             0.1.0.0
 synopsis:            SGBD relacional embarcado com esquema no nivel de tipos
 description:         Projeto da disciplina Desenvolvimento Orientado a Tipos (UFABC).
 author:              Vitor Martins Bueno Lima
-maintainer:          vitor@example.com
+maintainer:          marvitox@users.noreply.github.com
 license:             BSD-3-Clause
 category:            Database
 
-language: GHC2021
-
-default-extensions:
-  - DataKinds
-  - GADTs
-  - TypeFamilies
-  - TypeFamilyDependencies
-  - TypeOperators
-  - TypeApplications
-  - PolyKinds
-  - ConstraintKinds
-  - KindSignatures
-  - StandaloneKindSignatures
-  - RankNTypes
-  - ScopedTypeVariables
-  - AllowAmbiguousTypes
-  - UndecidableInstances
-  - FlexibleContexts
-  - FlexibleInstances
-  - LambdaCase
-  - OverloadedStrings
-  - DerivingStrategies
+# Mesma convencao das listas: sem default-extensions, cada modulo declara
+# explicitamente as extensoes que usa, para deixar visivel qual tecnica
+# resolve qual problema.
+language: Haskell2010
 
 ghc-options:
+  - -O2
   - -Wall
-  - -Wcompat
-  - -Wincomplete-uni-patterns
-  - -Wredundant-constraints
+  - -Wextra
 
 dependencies:
-  - base >= 4.18 && < 5
-  - text
+  - base
   - containers
+  - text
 
 library:
   source-dirs: src
+  ghc-options:
+    - -fplugin GHC.TypeLits.KnownNat.Solver
+  dependencies:
+    - ghc-typelits-knownnat
 
 executables:
   typedql:
@@ -57,3 +42,6 @@ tests:
     source-dirs: test
     dependencies:
       - typedql
+      - tasty
+      - tasty-hunit
+      - tasty-quickcheck
