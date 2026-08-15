@@ -31,6 +31,7 @@ module TypedQL.Row
   , KnownIndex (..)
   , getAt
   , col
+  , appendRow
     -- * Singleton do esquema inteiro
   , SSchema (..)
   , KnownSchema (..)
@@ -98,6 +99,16 @@ instance {-# OVERLAPPABLE #-} KnownIndex n c s => KnownIndex n c (d : s) where
 getAt :: Index c s -> Row s -> Slot c
 getAt Here (RCons x _) = x
 getAt (There i) (RCons _ r) = getAt i r
+
+-- | Concatena duas linhas produzindo uma linha do esquema concatenado.
+--
+-- Funciona como a concatenacao de listas comuns, mas no nivel dos tipos: ao
+-- casar o padrao do GADT, o GHC sabe que o primeiro argumento e @'[]@ (caso
+-- 'RNil') ou @c : s1'@ (caso 'RCons'), o que faz 'Append' reduzir na assinatura
+-- sem precisar de nenhum helper de prova. Usado pelo modulo 4 nas juncoes.
+appendRow :: Row s1 -> Row s2 -> Row (Append s1 s2)
+appendRow RNil       r2 = r2
+appendRow (RCons x r1) r2 = RCons x (appendRow r1 r2)
 
 -- | Acesso por nome. Uso: @col \@"open_rate" linha@.
 --

@@ -21,6 +21,7 @@ ESPERADO = {
     "FiltroNulavel.hs": "este filtro pode ser NULL",
     "ColunaNulavelSemMaybe.hs": "Maybe Text",
     "LeituraNulavelSemMaybe.hs": "Maybe Text",
+    "EvalSemCompilar.hs": "ainda nao foi compilada",
 }
 
 

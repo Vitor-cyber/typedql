@@ -43,6 +43,7 @@ module TypedQL.Schema
   , Project
   , Rename
   , MakeNullable
+  , Append
     -- * Restricoes
   , HasColumn
   , Disjoint
@@ -204,6 +205,14 @@ type MakeNullable :: Schema -> Schema
 type family MakeNullable s where
   MakeNullable '[] = '[]
   MakeNullable (Col n t _ : rest) = Col n t Nullable : MakeNullable rest
+
+-- | Concatena dois esquemas. Usada pelo modulo 4 para o resultado de uma juncao.
+-- A familia e fechada com a mesma estrutura de 'Append' de listas comuns; o GHC
+-- reduz por casamento estrutural quando o primeiro argumento e concreto.
+type Append :: Schema -> Schema -> Schema
+type family Append s1 s2 where
+  Append '[] s2 = s2
+  Append (c : s1) s2 = c : Append s1 s2
 
 -- | "O esquema contem a coluna n com tipo t", como restricao.
 type HasColumn :: Symbol -> SqlType -> Schema -> Constraint

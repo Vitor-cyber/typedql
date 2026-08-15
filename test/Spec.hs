@@ -11,6 +11,7 @@ import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import Test.Tasty
 import Test.Tasty.HUnit
+import TypedQL.Algebra
 import TypedQL.Expr
 import TypedQL.Row
 import TypedQL.Schema
@@ -32,6 +33,34 @@ linha =
 linhaSemCnpj :: Row Vendors
 linhaSemCnpj =
   RCons "FAKEV" (RCons "Fornecedor Teste Dois" (RCons 0.10 (RCons 3 (RCons Nothing RNil))))
+
+-- | Esquema de campanhas: disjunto de Vendors para poder ser juntado.
+type Campanhas :: Schema
+type Campanhas =
+  [ "camp_id"     := TInt
+  , "camp_vendor" := TText
+  ]
+
+-- Dados para os testes do modulo 4.
+-- VFAKE tem 2 campanhas, FAKEV nao tem nenhuma.
+tabelaVendors :: [Row Vendors]
+tabelaVendors = [linha, linhaSemCnpj]
+
+campanhas :: [Row Campanhas]
+campanhas =
+  [ RCons 1 (RCons "VFAKE" RNil)
+  , RCons 2 (RCons "VFAKE" RNil)
+  ]
+
+-- Condicao de juncao: vendor_code = camp_vendor.
+joinCond :: Predicate (Append Vendors Campanhas)
+joinCond = EEq (colE @"vendor_code") (colE @"camp_vendor")
+
+-- Teste de nivel de tipos: Append junta esquemas na ordem certa.
+appendJuntaEsquemas ::
+  Proxy (Append '["a" := TInt] '["b" := TText]) ->
+  Proxy '["a" := TInt, "b" := TText]
+appendJuntaEsquemas = id
 
 -- Testes no nivel de tipos: se estas definicoes compilam, a propriedade vale.
 -- Cada uma e uma igualdade de tipos verificada pelo GHC, nada roda em runtime.
@@ -195,5 +224,34 @@ main = defaultMain $ testGroup "TypedQL"
             @?= "((cnpj IS NULL) AND (open_rate < 0.5))"
       , testCase "renderExpr mostra o tipo do NULL" $
           renderExpr (ENull STInt :: Expr Vendors TInt Nullable) @?= "NULL::TInt"
+      ]
+  , testGroup "Algebra"
+      [ testCase "Append junta esquemas corretamente" $
+          const () (appendJuntaEsquemas Proxy) @?= ()
+      , testCase "fromTable + compile + eval devolve todas as linhas" $
+          length (eval (compile (fromTable "v" tabelaVendors))) @?= 2
+      , testCase "select filtra as linhas que nao passam no predicado" $
+          let filtroCnpjNull :: Predicate Vendors
+              filtroCnpjNull = EIsNull (colE @"cnpj")
+          in length (eval (compile (select filtroCnpjNull (fromTable "v" tabelaVendors)))) @?= 1
+      , testCase "project reduz o numero de colunas" $
+          let q = project (Proxy @'["vendor_code"]) (fromTable "v" tabelaVendors)
+              rows = eval (compile q)
+          in length rows @?= 2
+      , testCase "project preserva os valores das colunas selecionadas" $
+          let q = project (Proxy @'["vendor_code"]) (fromTable "v" tabelaVendors)
+              rows = eval (compile q)
+          in map (col @"vendor_code") rows @?= ["VFAKE", "FAKEV"]
+      , testCase "innerJoin descarta o lado sem correspondencia" $
+          length (eval (compile (innerJoin joinCond (fromTable "v" tabelaVendors) (fromTable "c" campanhas)))) @?= 2
+      , testCase "leftJoin mantem todas as linhas do lado esquerdo" $
+          length (eval (compile (leftJoin joinCond (fromTable "v" tabelaVendors) (fromTable "c" campanhas)))) @?= 3
+      , testCase "leftJoin preenche com Nothing quando nao ha correspondencia" $
+          let rows = eval (compile (leftJoin joinCond (fromTable "v" tabelaVendors) (fromTable "c" campanhas)))
+              semCamp = filter (\r -> col @"vendor_code" r == "FAKEV") rows
+          in map (col @"camp_id") semCamp @?= [Nothing]
+      , testCase "renderSQL produz SQL com WHERE" $
+          let q = select (EIsNull (colE @"cnpj" :: Expr Vendors TText Nullable)) (fromTable "vendors" tabelaVendors)
+          in renderSQL q @?= "SELECT * FROM (vendors) WHERE (cnpj IS NULL)"
       ]
   ]

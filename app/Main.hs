@@ -9,6 +9,7 @@ module Main (main) where
 
 import Data.Proxy (Proxy (..))
 import qualified Data.Text as T
+import TypedQL.Algebra
 import TypedQL.Expr
 import TypedQL.Row
 import TypedQL.Schema
@@ -49,9 +50,23 @@ filtroCritico =
     (ELt (colE @"open_rate") (ELit 0.1))
     (EIsNull (colE @"cnpj"))
 
+-- | Esquema de campanhas de comunicacao. Os nomes sao diferentes de 'Vendors'
+-- para que os dois esquemas sejam disjuntos e possam ser juntados.
+type Campanhas :: Schema
+type Campanhas =
+  [ "camp_id" := TInt
+  , "camp_vendor" := TText
+  ]
+
+-- | Condicao de juncao: vendor_code do lado esquerdo deve igualar camp_vendor
+-- do lado direito. O tipo garante que as duas colunas existem e tem o mesmo
+-- tipo SQL (TText). Comparar texto com inteiro nao compila.
+joinCond :: Predicate (Append Vendors Campanhas)
+joinCond = EEq (colE @"vendor_code") (colE @"camp_vendor")
+
 main :: IO ()
 main = do
-  putStrLn "TypedQL 0.1 - modulos 1 (Schema), 2 (Row) e 3 (Expr)"
+  putStrLn "TypedQL 0.1 - modulos 1 (Schema), 2 (Row), 3 (Expr) e 4 (Algebra)"
   putStrLn ""
   putStrLn "--- modulo 1: Schema ---"
   putStrLn ""
@@ -114,6 +129,33 @@ main = do
     ( "  COALESCE(cnpj, 'sem cadastro') :: Text = "
         ++ T.unpack (evalExpr semCnpj (ECoalesce (colE @"cnpj") (ELit "sem cadastro")))
     )
+
+  let campanhas :: [Row Campanhas]
+      campanhas =
+        [ RCons 1 (RCons "VFAKE" RNil)
+        , RCons 2 (RCons "VFAKE" RNil)
+        ]
+      tabelaVendors = [comCnpj, semCnpj]
+
+  putStrLn "--- modulo 4: Algebra ---"
+  putStrLn ""
+  let planoSelecao = select filtroCritico (fromTable "vendors" tabelaVendors)
+  putStrLn ("Selecao (SQL): " ++ renderSQL planoSelecao)
+  let selecionados = eval (compile planoSelecao)
+  putStrLn ("Resultado (" ++ show (length selecionados) ++ " linhas):")
+  mapM_ (\r -> putStrLn ("  " ++ T.unpack (col @"vendor_code" r))) selecionados
+  putStrLn ""
+  let planoJuncao = innerJoin joinCond (fromTable "vendors" tabelaVendors) (fromTable "campanhas" campanhas)
+  putStrLn ("INNER JOIN (SQL): " ++ renderSQL planoJuncao)
+  let linhasJuncao = eval (compile planoJuncao)
+  putStrLn ("Resultado (" ++ show (length linhasJuncao) ++ " linhas; FAKEV sem campanha some):")
+  mapM_ (\r -> putStrLn ("  vendor=" ++ T.unpack (col @"vendor_code" r) ++ ", camp_id=" ++ show (col @"camp_id" r))) linhasJuncao
+  putStrLn ""
+  let planoLeft = leftJoin joinCond (fromTable "vendors" tabelaVendors) (fromTable "campanhas" campanhas)
+  putStrLn ("LEFT JOIN (SQL): " ++ renderSQL planoLeft)
+  let linhasLeft = eval (compile planoLeft)
+  putStrLn ("Resultado (" ++ show (length linhasLeft) ++ " linhas; FAKEV aparece com camp_id=Nothing):")
+  mapM_ (\r -> putStrLn ("  vendor=" ++ T.unpack (col @"vendor_code" r) ++ ", camp_id=" ++ show (col @"camp_id" r))) linhasLeft
 
 mostraColuna :: (String, SqlType, Nullability) -> IO ()
 mostraColuna (nome, tipo, nulabilidade) =
