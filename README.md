@@ -11,8 +11,27 @@ rodar, e a que custo?
 ## Uso
 
 ```
-stack run
-stack test
+stack run                                  # demonstracao do modulo atual
+stack test                                 # testes de valor e de tipo
+python scripts/testar_negativos.py         # consultas que NAO devem compilar
+```
+
+Requer Stack 3.11.1 e GHC 9.6.6 (snapshot lts-22.43). O `stack` baixa o GHC
+sozinho na primeira execucao.
+
+### Os testes negativos
+
+A garantia central do projeto e negativa: certas consultas nao existem como
+programa valido. `scripts/testar_negativos.py` compila cada arquivo de
+`negativos/` e falha se algum deles compilar. Saida atual:
+
+```
+[OK] ColunaInexistente.hs  TypedQL: a coluna "vendor_cod" nao existe neste esquema.
+                           Colunas disponiveis: ["vendor_code", "vendor_name",
+                                                 "open_rate", "defeitos"]
+[OK] JuncaoAmbigua.hs      TypedQL: juncao ambigua, a coluna "vendor_code"
+                           aparece nos dois lados.
+[OK] TipoErrado.hs         Couldn't match type 'TDouble' with 'TInt'
 ```
 
 ## Estado
