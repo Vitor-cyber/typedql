@@ -1,0 +1,6 @@
+vendor_code,vendor_name,open_rate,defeitos
+VFAKE,Fornecedor Teste Um,0.42,17
+FAKEV,Fornecedor Teste Dois,0.08,3
+VENDF,Fornecedor Teste Tres,0.65,0
+ZZTOP,Fornecedor Teste Quatro,0.19,42
+QQBAR,Fornecedor Teste Cinco,0.51,8

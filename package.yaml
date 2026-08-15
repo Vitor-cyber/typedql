@@ -1,0 +1,59 @@
+name:                typedql
+version:             0.1.0.0
+synopsis:            SGBD relacional embarcado com esquema no nivel de tipos
+description:         Projeto da disciplina Desenvolvimento Orientado a Tipos (UFABC).
+author:              Vitor Martins Bueno Lima
+maintainer:          vitor@example.com
+license:             BSD-3-Clause
+category:            Database
+
+language: GHC2021
+
+default-extensions:
+  - DataKinds
+  - GADTs
+  - TypeFamilies
+  - TypeFamilyDependencies
+  - TypeOperators
+  - TypeApplications
+  - PolyKinds
+  - ConstraintKinds
+  - KindSignatures
+  - StandaloneKindSignatures
+  - RankNTypes
+  - ScopedTypeVariables
+  - AllowAmbiguousTypes
+  - UndecidableInstances
+  - FlexibleContexts
+  - FlexibleInstances
+  - LambdaCase
+  - OverloadedStrings
+  - DerivingStrategies
+
+ghc-options:
+  - -Wall
+  - -Wcompat
+  - -Wincomplete-uni-patterns
+  - -Wredundant-constraints
+
+dependencies:
+  - base >= 4.18 && < 5
+  - text
+  - containers
+
+library:
+  source-dirs: src
+
+executables:
+  typedql:
+    main: Main.hs
+    source-dirs: app
+    dependencies:
+      - typedql
+
+tests:
+  typedql-test:
+    main: Spec.hs
+    source-dirs: test
+    dependencies:
+      - typedql
