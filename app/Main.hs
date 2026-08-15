@@ -7,18 +7,21 @@
 
 module Main (main) where
 
-import qualified Data.Text as T
 import Data.Proxy (Proxy (..))
+import qualified Data.Text as T
+import TypedQL.Expr
 import TypedQL.Row
 import TypedQL.Schema
 
 -- | Esquema de exemplo, declarado no nivel de tipos.
+-- @:=@ e coluna obrigatoria, @:?@ e coluna que aceita NULL.
 type Vendors :: Schema
 type Vendors =
   [ "vendor_code" := TText
   , "vendor_name" := TText
   , "open_rate" := TDouble
   , "defeitos" := TInt
+  , "cnpj" :? TText
   ]
 
 -- Projecao valida: o compilador aceita.
@@ -26,14 +29,31 @@ type Vendors =
 projecaoOk :: (All Show (Project ["vendor_code", "open_rate"] Vendors)) => Proxy Vendors
 projecaoOk = Proxy
 
--- | Uma linha concreta desse esquema. A ordem e os tipos sao ditados por
+-- | Duas linhas concretas. A ordem, os tipos e a nulabilidade sao ditados por
 -- 'Vendors': trocar qualquer um deles nao compila.
-linha :: Row Vendors
-linha = RCons "VFAKE" (RCons "Fornecedor Falso" (RCons 0.42 (RCons 7 RNil)))
+comCnpj :: Row Vendors
+comCnpj =
+  RCons "VFAKE" (RCons "Fornecedor Falso" (RCons 0.42 (RCons 7 (RCons (Just "00.000.000/0001-00") RNil))))
+
+semCnpj :: Row Vendors
+semCnpj =
+  RCons "FAKEV" (RCons "Fornecedor Sem Cadastro" (RCons 0.08 (RCons 31 (RCons Nothing RNil))))
+
+-- | Um filtro: taxa de abertura abaixo de 10 por cento e sem CNPJ cadastrado.
+--
+-- Repare que @EIsNull@ e obrigatorio para o resultado ser um 'Predicate': sem ele
+-- a expressao seria nulavel e 'evalWhere' nao compilaria.
+filtroCritico :: Predicate Vendors
+filtroCritico =
+  EAnd
+    (ELt (colE @"open_rate") (ELit 0.1))
+    (EIsNull (colE @"cnpj"))
 
 main :: IO ()
 main = do
-  putStrLn "TypedQL 0.1 - modulos 1 (Schema) e 2 (Row)"
+  putStrLn "TypedQL 0.1 - modulos 1 (Schema), 2 (Row) e 3 (Expr)"
+  putStrLn ""
+  putStrLn "--- modulo 1: Schema ---"
   putStrLn ""
   putStrLn "Reflexao (tipo -> valor):"
   print (demote (singSqlType @TDouble))
@@ -52,12 +72,49 @@ main = do
   putStrLn "--- modulo 2: Row ---"
   putStrLn ""
   putStrLn "Cabecalho refletido do esquema:"
-  mapM_ (\(n, t) -> putStrLn ("  " ++ n ++ " : " ++ show t)) (header (schemaSing @Vendors))
+  mapM_ mostraColuna (header (schemaSing @Vendors))
   putStrLn ""
   putStrLn "Acesso por nome, resolvido em compile time:"
-  putStrLn ("  col @\"vendor_name\" = " ++ T.unpack (col @"vendor_name" linha))
-  putStrLn ("  col @\"open_rate\"   = " ++ show (col @"open_rate" linha))
-  putStrLn ("  col @\"defeitos\"    = " ++ show (col @"defeitos" linha))
+  putStrLn ("  col @\"vendor_name\" = " ++ T.unpack (col @"vendor_name" comCnpj))
+  putStrLn ("  col @\"open_rate\"   = " ++ show (col @"open_rate" comCnpj))
+  putStrLn ("  col @\"cnpj\"        = " ++ show (col @"cnpj" comCnpj) ++ "   <- Maybe, porque a coluna e nulavel")
   putStrLn ""
   putStrLn "Linha inteira, percorrida com All Show:"
-  print (showRow (schemaSing @Vendors) linha)
+  print (showRow (schemaSing @Vendors) comCnpj)
+  putStrLn ""
+  putStrLn "--- modulo 3: Expr ---"
+  putStrLn ""
+  putStrLn ("Filtro: " ++ renderExpr filtroCritico)
+  putStrLn ("  na linha com cnpj: " ++ show (evalWhere comCnpj filtroCritico))
+  putStrLn ("  na linha sem cnpj: " ++ show (evalWhere semCnpj filtroCritico))
+  putStrLn ""
+  putStrLn "O tipo do resultado depende da nulabilidade:"
+  putStrLn
+    ( "  defeitos + 3        :: Int        = "
+        ++ show (evalExpr comCnpj (EAdd (colE @"defeitos") (ELit 3)))
+    )
+  putStrLn
+    ( "  defeitos + NULL     :: Maybe Int  = "
+        ++ show (evalExpr comCnpj (EAdd (colE @"defeitos") (ENull STInt)))
+    )
+  putStrLn ""
+  putStrLn "Logica de tres valores do SQL:"
+  putStrLn
+    ( "  FALSE AND (cnpj = 'x') = "
+        ++ show (evalExpr semCnpj (EAnd (ELit False) (EEq (colE @"cnpj") (ELit "x"))))
+        ++ "   (nao NULL: FALSE absorve)"
+    )
+  putStrLn
+    ( "  TRUE  AND (cnpj = 'x') = "
+        ++ show (evalExpr semCnpj (EAnd (ELit True) (EEq (colE @"cnpj") (ELit "x"))))
+    )
+  putStrLn ""
+  putStrLn "COALESCE tira o Maybe do tipo, nao apenas do valor:"
+  putStrLn
+    ( "  COALESCE(cnpj, 'sem cadastro') :: Text = "
+        ++ T.unpack (evalExpr semCnpj (ECoalesce (colE @"cnpj") (ELit "sem cadastro")))
+    )
+
+mostraColuna :: (String, SqlType, Nullability) -> IO ()
+mostraColuna (nome, tipo, nulabilidade) =
+  putStrLn ("  " ++ nome ++ " : " ++ show tipo ++ " " ++ show nulabilidade)

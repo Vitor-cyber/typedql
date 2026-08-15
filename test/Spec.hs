@@ -8,41 +8,92 @@
 module Main (main) where
 
 import Data.Proxy (Proxy (..))
+import Data.Text (Text)
 import Test.Tasty
 import Test.Tasty.HUnit
+import TypedQL.Expr
 import TypedQL.Row
 import TypedQL.Schema
 
+-- | Esquema de teste. A ultima coluna aceita NULL: e ela que exercita o modulo 3.
 type Vendors :: Schema
 type Vendors =
   [ "vendor_code" := TText
   , "vendor_name" := TText
   , "open_rate" := TDouble
   , "defeitos" := TInt
+  , "cnpj" :? TText
   ]
 
 linha :: Row Vendors
-linha = RCons "VFAKE" (RCons "Fornecedor Teste Um" (RCons 0.42 (RCons 17 RNil)))
+linha =
+  RCons "VFAKE" (RCons "Fornecedor Teste Um" (RCons 0.42 (RCons 17 (RCons (Just "00.000.000/0001-00") RNil))))
+
+linhaSemCnpj :: Row Vendors
+linhaSemCnpj =
+  RCons "FAKEV" (RCons "Fornecedor Teste Dois" (RCons 0.10 (RCons 3 (RCons Nothing RNil))))
 
 -- Testes no nivel de tipos: se estas definicoes compilam, a propriedade vale.
 -- Cada uma e uma igualdade de tipos verificada pelo GHC, nada roda em runtime.
 tipoDaColuna :: Proxy (TypeOf "open_rate" Vendors) -> Proxy TDouble
 tipoDaColuna = id
 
-nomesDoEsquema :: Proxy (Names Vendors) -> Proxy ["vendor_code", "vendor_name", "open_rate", "defeitos"]
+nomesDoEsquema ::
+  Proxy (Names Vendors) ->
+  Proxy ["vendor_code", "vendor_name", "open_rate", "defeitos", "cnpj"]
 nomesDoEsquema = id
 
 projecaoPreservaTipo ::
   Proxy (Project '["open_rate"] Vendors) -> Proxy '["open_rate" := TDouble]
 projecaoPreservaTipo = id
 
+projecaoPreservaNulabilidade ::
+  Proxy (Project '["cnpj"] Vendors) -> Proxy '["cnpj" :? TText]
+projecaoPreservaNulabilidade = id
+
 renomeiaPreservaTipo ::
   Proxy (Rename "open_rate" "taxa" Vendors) ->
-  Proxy ["vendor_code" := TText, "vendor_name" := TText, "taxa" := TDouble, "defeitos" := TInt]
+  Proxy
+    [ "vendor_code" := TText
+    , "vendor_name" := TText
+    , "taxa" := TDouble
+    , "defeitos" := TInt
+    , "cnpj" :? TText
+    ]
 renomeiaPreservaTipo = id
 
 interpEInjetiva :: Proxy (Interp TInt) -> Proxy Int
 interpEInjetiva = id
+
+nulabilidadeDaColuna :: Proxy (NullabilityOf "cnpj" Vendors) -> Proxy Nullable
+nulabilidadeDaColuna = id
+
+slotObrigatorioNaoTemMaybe :: Proxy (Slot ("open_rate" := TDouble)) -> Proxy Double
+slotObrigatorioNaoTemMaybe = id
+
+slotNulavelTemMaybe :: Proxy (Slot ("cnpj" :? TText)) -> Proxy (Maybe Text)
+slotNulavelTemMaybe = id
+
+todasNulaveis ::
+  Proxy (MakeNullable '["defeitos" := TInt, "cnpj" :? TText]) ->
+  Proxy ["defeitos" :? TInt, "cnpj" :? TText]
+todasNulaveis = id
+
+mergeContamina :: Proxy (MergeNull NotNull Nullable) -> Proxy Nullable
+mergeContamina = id
+
+mergePreservaTotal :: Proxy (MergeNull NotNull NotNull) -> Proxy NotNull
+mergePreservaTotal = id
+
+-- | Predicado de topo, com assinatura. @renderExpr@ nao menciona o esquema no
+-- resultado, logo o GHC nao consegue inferir @s@ a partir do uso: a anotacao e
+-- obrigatoria. Note que o predicado e total (@NotNull@) mesmo citando uma coluna
+-- nulavel, porque @IS NULL@ e a valvula de escape da nulabilidade.
+predicadoImpresso :: Predicate Vendors
+predicadoImpresso =
+  EAnd
+    (EIsNull (colE @"cnpj"))
+    (ELt (colE @"open_rate") (ELit 0.5))
 
 main :: IO ()
 main = defaultMain $ testGroup "TypedQL"
@@ -50,12 +101,21 @@ main = defaultMain $ testGroup "TypedQL"
       [ testCase "TypeOf devolve o tipo da coluna" $ const () (tipoDaColuna Proxy) @?= ()
       , testCase "Names lista os nomes na ordem" $ const () (nomesDoEsquema Proxy) @?= ()
       , testCase "Project preserva o tipo da coluna" $ const () (projecaoPreservaTipo Proxy) @?= ()
-      , testCase "Rename troca o nome e mantem o tipo" $ const () (renomeiaPreservaTipo Proxy) @?= ()
+      , testCase "Project preserva a nulabilidade" $ const () (projecaoPreservaNulabilidade Proxy) @?= ()
+      , testCase "Rename troca o nome e mantem o resto" $ const () (renomeiaPreservaTipo Proxy) @?= ()
       , testCase "Interp e injetiva" $ const () (interpEInjetiva Proxy) @?= ()
+      , testCase "NullabilityOf le a nulabilidade" $ const () (nulabilidadeDaColuna Proxy) @?= ()
+      , testCase "Slot obrigatorio nao embrulha em Maybe" $ const () (slotObrigatorioNaoTemMaybe Proxy) @?= ()
+      , testCase "Slot nulavel embrulha em Maybe" $ const () (slotNulavelTemMaybe Proxy) @?= ()
+      , testCase "MakeNullable afrouxa o esquema todo" $ const () (todasNulaveis Proxy) @?= ()
+      , testCase "MergeNull contamina se um lado e nulavel" $ const () (mergeContamina Proxy) @?= ()
+      , testCase "MergeNull preserva total se os dois sao totais" $ const () (mergePreservaTotal Proxy) @?= ()
       ]
   , testGroup "Schema, nivel de valores"
       [ testCase "demote e a inversa do singleton" $
           demote STInt @?= TInt
+      , testCase "demoteNull idem para nulabilidade" $
+          demoteNull SNullable @?= Nullable
       , testCase "parseSqlType ignora caixa" $
           fmap show (parseSqlType "TEXT") @?= Just "TText"
       , testCase "parseSqlType rejeita nome invalido" $
@@ -68,19 +128,72 @@ main = defaultMain $ testGroup "TypedQL"
           col @"vendor_code" linha @?= "VFAKE"
       , testCase "col devolve Double na coluna numerica" $
           col @"open_rate" linha @?= 0.42
-      , testCase "col devolve Int na ultima coluna" $
+      , testCase "col devolve Int na coluna inteira" $
           col @"defeitos" linha @?= 17
+      , testCase "col devolve Maybe na coluna nulavel" $
+          col @"cnpj" linha @?= Just "00.000.000/0001-00"
+      , testCase "col devolve Nothing quando a coluna nulavel esta vazia" $
+          col @"cnpj" linhaSemCnpj @?= Nothing
       , testCase "header reflete o esquema inteiro" $
           header (schemaSing @Vendors)
-            @?= [ ("vendor_code", TText)
-                , ("vendor_name", TText)
-                , ("open_rate", TDouble)
-                , ("defeitos", TInt)
+            @?= [ ("vendor_code", TText, NotNull)
+                , ("vendor_name", TText, NotNull)
+                , ("open_rate", TDouble, NotNull)
+                , ("defeitos", TInt, NotNull)
+                , ("cnpj", TText, Nullable)
                 ]
       , testCase "showRow percorre a linha usando All Show" $
           showRow (schemaSing @Vendors) linha
-            @?= ["\"VFAKE\"", "\"Fornecedor Teste Um\"", "0.42", "17"]
+            @?= [ "\"VFAKE\""
+                , "\"Fornecedor Teste Um\""
+                , "0.42"
+                , "17"
+                , "Just \"00.000.000/0001-00\""
+                ]
       , testCase "withRow elimina o existencial de linha" $
-          withRow (SomeRow (schemaSing @Vendors) linha) (\s _ -> length (header s)) @?= 4
+          withRow (SomeRow (schemaSing @Vendors) linha) (\s _ -> length (header s)) @?= 5
+      ]
+  , testGroup "Expr, avaliacao"
+      [ testCase "coluna obrigatoria avalia para o valor cru" $
+          evalExpr linha (colE @"open_rate") @?= 0.42
+      , testCase "coluna nulavel avalia para Maybe" $
+          evalExpr linha (colE @"cnpj") @?= Just "00.000.000/0001-00"
+      , testCase "soma de dois totais nao passa por Maybe" $
+          evalExpr linha (EAdd (colE @"defeitos") (ELit 3)) @?= 20
+      , testCase "NULL contamina a soma" $
+          evalExpr linha (EAdd (colE @"defeitos") (ENull STInt)) @?= Nothing
+      , testCase "igualdade com NULL da NULL, nao False" $
+          evalExpr linhaSemCnpj (EEq (colE @"cnpj") (ELit "00.000.000/0001-00")) @?= Nothing
+      , testCase "igualdade entre totais decide" $
+          evalWhere linha (EEq (colE @"vendor_code") (ELit "VFAKE")) @?= True
+      , testCase "IS NULL sempre decide" $
+          evalWhere linhaSemCnpj (EIsNull (colE @"cnpj")) @?= True
+      , testCase "COALESCE devolve valor cru, sem Maybe" $
+          evalExpr linhaSemCnpj (ECoalesce (colE @"cnpj") (ELit "sem cnpj")) @?= "sem cnpj"
+      , testCase "COALESCE deixa passar o valor presente" $
+          evalExpr linha (ECoalesce (colE @"cnpj") (ELit "sem cnpj")) @?= "00.000.000/0001-00"
+      ]
+  , testGroup "Expr, logica de tres valores"
+      [ testCase "FALSE AND NULL e FALSE, nao NULL" $
+          evalExpr linhaSemCnpj (EAnd (ELit False) (EEq (colE @"cnpj") (ELit "x"))) @?= Just False
+      , testCase "TRUE OR NULL e TRUE, nao NULL" $
+          evalExpr linhaSemCnpj (EOr (ELit True) (EEq (colE @"cnpj") (ELit "x"))) @?= Just True
+      , testCase "TRUE AND NULL continua NULL" $
+          evalExpr linhaSemCnpj (EAnd (ELit True) (EEq (colE @"cnpj") (ELit "x"))) @?= Nothing
+      , testCase "kleeneAnd e comutativo no caso FALSE" $
+          kleeneAnd Nothing (Just False) @?= Just False
+      , testCase "NOT preserva a nulabilidade" $
+          evalExpr linhaSemCnpj (ENot (EEq (colE @"cnpj") (ELit "x"))) @?= Nothing
+      , testCase "predicado total decide na linha sem cnpj" $
+          evalWhere linhaSemCnpj predicadoImpresso @?= True
+      , testCase "predicado total decide na linha com cnpj" $
+          evalWhere linha predicadoImpresso @?= False
+      ]
+  , testGroup "Expr, impressao"
+      [ testCase "renderExpr reconstroi o SQL" $
+          renderExpr predicadoImpresso
+            @?= "((cnpj IS NULL) AND (open_rate < 0.5))"
+      , testCase "renderExpr mostra o tipo do NULL" $
+          renderExpr (ENull STInt :: Expr Vendors TInt Nullable) @?= "NULL::TInt"
       ]
   ]

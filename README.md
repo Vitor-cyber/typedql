@@ -11,7 +11,7 @@ rodar, e a que custo?
 ## Uso
 
 ```
-stack run                                  # demonstracao do modulo atual
+stack run                                  # demonstracao dos modulos ja feitos
 stack test                                 # testes de valor e de tipo
 python scripts/testar_negativos.py         # consultas que NAO devem compilar
 ```
@@ -27,22 +27,31 @@ programa valido. `scripts/testar_negativos.py` compila cada arquivo de
 esperada (um import errado tambem faria a compilacao falhar). Saida atual:
 
 ```
-[OK] AcessoAColunaInexistente.hs  No instance for (KnownIndex "taxa" TText '[])
+[OK] AcessoAColunaInexistente.hs  TypedQL: a coluna "taxa" nao existe neste esquema.
+                                  Colunas disponiveis: ["vendor_code", "open_rate"]
 [OK] ColunaInexistente.hs         TypedQL: a coluna "vendor_cod" nao existe neste
                                   esquema. Colunas disponiveis: ["vendor_code",
                                   "vendor_name", "open_rate", "defeitos"]
+[OK] ColunaNulavelSemMaybe.hs     Couldn't match type 'Text' with 'Maybe Text'
+                                  Expected: Slot ("cnpj" :? TText)
+[OK] FiltroNulavel.hs             TypedQL: este filtro pode ser NULL, entao ele nao
+                                  decide nada. Um WHERE precisa escolher entre
+                                  verdadeiro e falso. Trate o NULL antes, com
+                                  EIsNull ou ECoalesce.
 [OK] JuncaoAmbigua.hs             TypedQL: juncao ambigua, a coluna "vendor_code"
                                   aparece nos dois lados.
+[OK] LeituraNulavelSemMaybe.hs    Couldn't match type 'Maybe Text' with 'Text'
+                                  Actual: Slot (ColumnOf "cnpj" Vendors)
 [OK] TipoErrado.hs                Couldn't match type 'TDouble' with 'TInt'
 ```
 
-4 de 4 rejeitados corretamente.
+7 de 7 rejeitados corretamente.
 
 ## Estado
 
 - [x] Modulo 1: Schema (esquema no nivel de tipos, singletons a mao)
 - [x] Modulo 2: Row (lista heterogenea indexada pelo esquema, acesso por prova)
-- [ ] Modulo 3: Expr (expressoes tipadas com nulabilidade)
+- [x] Modulo 3: Expr (expressoes tipadas, nulabilidade calculada, WHERE total)
 - [ ] Modulo 4: Algebra (algebra relacional com estagios)
 - [ ] Modulo 5: Frontend estatico (quasiquoter)
 - [ ] Modulo 6: Frontend dinamico (existenciais e singletons)

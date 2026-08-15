@@ -15,9 +15,12 @@ STACK = shutil.which("stack") or "C:/Users/marvitox/haskell/bin/stack.exe"
 # Um import errado tambem faria o GHC falhar, e o teste passaria por acidente.
 ESPERADO = {
     "ColunaInexistente.hs": "nao existe neste esquema",
-    "AcessoAColunaInexistente.hs": "KnownIndex",
+    "AcessoAColunaInexistente.hs": "nao existe neste esquema",
     "JuncaoAmbigua.hs": "juncao ambigua",
     "TipoErrado.hs": "TDouble",
+    "FiltroNulavel.hs": "este filtro pode ser NULL",
+    "ColunaNulavelSemMaybe.hs": "Maybe Text",
+    "LeituraNulavelSemMaybe.hs": "Maybe Text",
 }
 
 

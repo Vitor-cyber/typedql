@@ -166,3 +166,211 @@ falha?
 fim da lista sem achar. O script `scripts/testar_negativos.py` agora confere
 tambem **a mensagem**, nao so o fato de a compilacao falhar, porque um import
 errado tambem faria o teste passar por acidente.
+
+(Nota posterior: no modulo 3 a assinatura passou a ser
+`KnownIndex "taxa" (Col "taxa" t nl) '[]`, porque a prova de pertinencia passou a
+carregar a coluna inteira em vez de nome e tipo separados. A forma da mensagem
+mudou, o conteudo dela nao.)
+
+## Modulo 3: Expr
+
+### O problema
+Um SGBD erra de tres formas ao avaliar uma expressao escalar: comparando coisas de
+tipos incompativeis (`WHERE nome < 3`), somando texto, e esquecendo que um valor
+pode ser NULL. Os dois primeiros o modulo 1 ja resolve, porque o tipo SQL de cada
+coluna esta no esquema. O terceiro e o assunto deste modulo, e e o mais
+interessante dos tres, por dois motivos.
+
+Primeiro, porque NULL em SQL nao e um valor, e um marcador de ausencia que
+contamina tudo o que toca: `1 + NULL` e NULL, `x = NULL` e NULL (nao FALSE, o que
+e a fonte classica de bug), e o `AND` opera em logica de tres valores. Segundo,
+porque a linguagem tem um lugar onde a ausencia simplesmente nao pode acontecer: o
+`WHERE`. Um filtro tem que decidir entre incluir e excluir a linha; "nao sei" nao e
+uma resposta. O SQL de verdade resolve isso escondendo a decisao (trata NULL como
+falso, silenciosamente). A pergunta deste modulo e se o sistema de tipos consegue
+tornar essa decisao **impossivel de esquecer**.
+
+### A solucao e por que ela funciona
+A nulabilidade virou um indice do tipo da expressao:
+
+```haskell
+type Expr :: Schema -> SqlType -> Nullability -> Type
+data Expr s t nl where ...
+```
+
+`Expr s t nl` se le "expressao que faz sentido no esquema `s`, produz o tipo SQL
+`t`, e pode (`Nullable`) ou nao pode (`NotNull`) ser NULL". Os tres pontos que
+fazem isso funcionar:
+
+1. **A nulabilidade e calculada, nao declarada.** Os construtores binarios tem
+   tipo `Expr s t n1 -> Expr s t n2 -> Expr s t (MergeNull n1 n2)`, e `MergeNull`
+   e uma familia fechada de duas equacoes: `MergeNull NotNull NotNull = NotNull` e
+   um curinga que devolve `Nullable`. O programador nao anota nada; ele monta a
+   expressao e o compilador propaga a contaminacao. Detalhe util: por ser fechada e
+   por o curinga so ser alcancado quando a primeira equacao e comprovadamente
+   inaplicavel, `MergeNull Nullable nl` reduz para `Nullable` mesmo com `nl`
+   desconhecido.
+
+2. **O tipo do resultado da avaliacao tambem e calculado.**
+
+   ```haskell
+   type family Result nl t where
+     Result NotNull  t = Interp t
+     Result Nullable t = Maybe (Interp t)
+
+   evalExpr :: Row s -> Expr s t nl -> Result nl t
+   ```
+
+   Isso e mais forte do que parece. Numa implementacao comum, avaliar devolveria
+   sempre `Maybe`, e toda expressao pagaria alocacao de `Just` e teste de `Nothing`
+   mesmo quando nenhum operando pode ser NULL. Aqui, `evalExpr` sobre uma expressao
+   total devolve o valor cru: a soma de duas colunas obrigatorias e a mesma
+   aplicacao de funcao que haveria em Haskell comum, sem embrulho. **A informacao de
+   tipo virou otimizacao**, nao so verificacao. E o mesmo `Result` e usado no
+   modulo 1 para definir o slot de uma coluna no esquema, o que garante que
+   "coluna nulavel" e "expressao nulavel" nao possam divergir: ha uma unica fonte
+   de verdade.
+
+3. **O `WHERE` exige totalidade, e a exigencia tem mensagem propria.**
+
+   ```haskell
+   type Predicate s = Expr s TBool NotNull
+   evalWhere :: Total nl => Row s -> Expr s TBool nl -> Bool
+   ```
+
+   `Total` e uma classe com duas instancias: `Total NotNull`, que funciona, e
+   `Total Nullable`, cujo **contexto e um `TypeError`**. Essa segunda instancia
+   nunca pode ser usada; ela existe apenas para o GHC ter algo especifico a dizer.
+   Sem ela a mensagem seria `Couldn't match type Nullable with NotNull`, que nao
+   ensina nada. Com ela:
+
+   ```
+   TypedQL: este filtro pode ser NULL, entao ele nao decide nada.
+   Um WHERE precisa escolher entre verdadeiro e falso.
+   Trate o NULL antes, com EIsNull ou ECoalesce.
+   ```
+
+   O truque geral vale registro: **uma instancia que existe so para falhar bem** e
+   uma ferramenta de design de API, nao um hack. Ela transforma um erro de
+   unificacao numa instrucao.
+
+E preciso haver saida da nulabilidade, senao o sistema so acumula `Nullable` e o
+`WHERE` fica inatingivel. Sao duas valvulas, e as duas sao honestas:
+`EIsNull :: Expr s t nl -> Expr s TBool NotNull` (perguntar se algo e NULL sempre
+tem resposta) e `ECoalesce :: Expr s t nl -> Expr s t NotNull -> Expr s t NotNull`
+(fornecer um padrao). Note que o segundo argumento do `ECoalesce` e obrigado a ser
+total: nao ha como "resolver" um NULL com outro NULL.
+
+A logica de tres valores foi implementada de verdade, nao aproximada. `FALSE AND
+NULL` e `FALSE`, porque o resultado ja esta determinado. Isso obrigou os
+conectivos booleanos a receberem **duas** implementacoes:
+
+```haskell
+liftBool :: SNullability n1 -> SNullability n2
+         -> (Bool -> Bool -> Bool)                    -- caso total
+         -> (Maybe Bool -> Maybe Bool -> Maybe Bool)  -- caso Kleene
+         -> Result n1 TBool -> Result n2 TBool -> Result (MergeNull n1 n2) TBool
+```
+
+O tipo obriga a fornecer a versao total; nao ha como despachar o caso `NotNull
+NotNull` para a versao de tres valores e depois extrair com `fromJust`.
+
+### Dificuldades e surpresas
+- **A refatoracao que nao dava para evitar.** A primeira versao do modulo tentou
+  colocar nulabilidade so na expressao, deixando o esquema como estava
+  (`"nome" := TText`). Nao funciona: se toda coluna do esquema e obrigatoria, a
+  unica forma de produzir uma expressao `Nullable` e `ENull` literal, e a
+  maquinaria inteira fica decorativa. Foi preciso voltar ao modulo 1 e trocar
+  `Column` de um par nome/tipo para uma tripla nome/tipo/nulabilidade, com dois
+  sinonimos de operador: `n := t` para obrigatoria e `n :? t` para nulavel. Licao
+  de projeto: **a propriedade tem que existir na fonte dos dados, nao so no
+  consumidor**. Isso tambem obrigou a mexer no `Index` do modulo 2, que passou a
+  carregar a coluna inteira (`Index c s`) em vez de nome e tipo separados.
+- **A armadilha do sinonimo de tipo em posicao de padrao.** Dentro da biblioteca e
+  obrigatorio casar com `Col n t nl`, nunca com `n := t`. `:=` e um sinonimo que
+  expande para `Col n t NotNull`, entao um padrao escrito com ele **compila e
+  silenciosamente ignora todas as colunas nulaveis**. Nao ha aviso. Custou tempo, e
+  e o tipo de erro que testes de tipo positivo nao pegam (o codigo compila; ele so
+  esta errado).
+- **`Result` nao e injetiva, e isso se paga em verbosidade.** De `Result nl t` o
+  compilador nao consegue voltar para `nl` e `t`, logo ele nao infere a
+  nulabilidade a partir do valor avaliado. Cada chamada dos helpers precisa dizer
+  explicitamente qual e, com aplicacao de tipos: `liftBin @n1 @n2 @u @u @TBool`. Os
+  helpers ganharam `forall` explicito so para fixar a ordem dessas aplicacoes.
+  Um `type family Result nl t = r | r -> nl t` resolveria? Nao: `Result NotNull
+  TInt = Int` e `Result Nullable TInt = Maybe Int` sao distintos, mas a injetividade
+  exigiria que o GHC soubesse que nenhum `Interp t` e um `Maybe`, e ele nao sabe.
+  A verbosidade e o preco real da familia de tipos aqui, e vale citar no relatorio
+  como custo medido.
+- **Nulabilidade de operando e existencial.** Em `EAnd a b`, as nulabilidades de
+  `a` e `b` nao aparecem no tipo do resultado (so dentro de `MergeNull`), portanto
+  sao variaveis existenciais e nao ha como nomea-las com `@`. No GHC 9.6 o jeito e
+  assinatura de padrao no sub-padrao: `EAnd (a :: Expr s TBool n1) (b :: Expr s
+  TBool n2) -> ...`. `TypeAbstractions` em padrao de construtor (`EAnd @n1 @n2 a
+  b`) so chega no 9.10.
+- **Por que os construtores carregam `KnownNullability`.** O avaliador precisa
+  saber **em runtime** se cada lado e um `Maybe` ou nao, para escolher a equacao
+  certa de `liftBin`. Um GADT guarda dicionarios: exigir a restricao na construcao
+  e obte-la de volta na desconstrucao. E o mesmo mecanismo que faz `ELit` exigir
+  `Show` e permitir que `renderExpr` imprima o literal sem restricao nenhuma na
+  propria assinatura.
+- **Ambiguidade na impressao.** `renderExpr :: Expr s t nl -> String` nao menciona
+  `s`, `t` nem `nl` no resultado, entao uma expressao escrita direto no argumento
+  nao tem como ser resolvida: o GHC pediu anotacao em sete pontos de uma unica
+  chamada. A correcao foi extrair a expressao para uma definicao de topo com
+  assinatura (`predicadoImpresso :: Predicate Vendors`). Isso e um sintoma
+  generalizavel: **funcoes que consomem sem devolver o indice forcam anotacao**, e
+  uma API polimorfica precisa de pontos de ancoragem nomeados.
+
+- **A refatoracao piorou uma mensagem de erro, e isso so apareceu porque o teste
+  negativo verifica a mensagem.** Antes, `col @"taxa"` numa coluna inexistente dava
+  `No instance for (KnownIndex "taxa" TText '[])`. Depois de a prova passar a
+  carregar a coluna inteira, passou a dar
+  `Couldn't match expected type Text with actual type Slot c0; the type variable c0
+  is ambiguous`, que nao diz nada sobre coluna nenhuma. Motivo: a coluna era uma
+  variavel resolvida pela dependencia funcional, e quando a instancia nao existe a
+  variavel simplesmente fica ambigua; o GHC reporta a ambiguidade e a causa
+  desaparece.
+
+  A correcao foi trocar a assinatura de `col` de
+  `KnownIndex n c s => Row s -> Slot c` para
+  `KnownIndex n (ColumnOf n s) s => Row s -> Slot (ColumnOf n s)`. Agora quem
+  determina a coluna e a familia de tipos, e a familia ja tem o `TypeError` bom (o
+  que lista as colunas disponiveis). A mensagem ficou melhor do que era antes da
+  refatoracao.
+
+  Ha uma tensao interessante aqui, porque o modulo 2 registrou o oposto: usar
+  `ColumnOf` **travava** a recursao. As duas coisas sao verdadeiras e a distincao e
+  onde o codigo esta. Na recursao interna o esquema e abstrato, `Lookup` nao reduz e
+  a familia trava; e preciso carregar a informacao na prova. Na fronteira da API o
+  esquema e concreto, a familia reduz, e usar a familia da erro melhor. **Regra que
+  vale generalizar: prova por dentro, familia de tipos por fora.**
+- Duas licoes de processo, nao de tipos. Primeira: o valor do teste negativo esta em
+  checar a **mensagem**, nao a falha. Se o script so checasse "nao compilou", a
+  regressao acima passaria despercebida e o projeto teria uma mensagem ruim na
+  entrega. Segunda: um teste negativo pode passar pelo motivo errado. O
+  `ColunaNulavelSemMaybe.hs` original usava um literal com `OverloadedStrings` e era
+  rejeitado por falta de instancia `IsString (Maybe Text)`, um sintoma indireto que
+  casava com a string esperada `"Maybe"` por acidente. Trocar o literal por um
+  `Text` nomeado fez o erro passar a ser a incompatibilidade que interessa,
+  `Couldn't match type Text with Maybe Text`.
+
+### Testes negativos que passaram a existir
+- `negativos/FiltroNulavel.hs` passa para `evalWhere` uma comparacao com coluna
+  nulavel. Rejeitado com a mensagem propria de `Total Nullable`.
+- `negativos/ColunaNulavelSemMaybe.hs` tenta **guardar** um valor cru numa coluna
+  nulavel. Rejeitado com `Expected: Slot ("cnpj" :? TText), Actual: Text`.
+- `negativos/LeituraNulavelSemMaybe.hs` tenta **ler** uma coluna nulavel como se
+  fosse crua. Rejeitado com `Couldn't match type Maybe Text with Text`. Este e o
+  lado que mais importa: nao existe caminho na API que entregue o valor de uma
+  coluna nulavel sem obrigar a tratar a ausencia.
+
+O `scripts/testar_negativos.py` tem agora 7 casos, e cada um confere um trecho
+esperado **da mensagem**, nao apenas o fato de a compilacao falhar.
+
+### Contagem parcial (para o relatorio)
+Ao fim do modulo 3, a suite tem 43 testes positivos e 7 negativos. As classes de
+erro de runtime que deixaram de existir sao quatro: coluna inexistente, tipo
+errado de coluna, comparacao entre tipos incompativeis, e uso de valor
+possivelmente ausente sem trata-lo. O custo medido, por enquanto, e verbosidade de
+aplicacao de tipos no avaliador, concentrada em quatro funcoes auxiliares.

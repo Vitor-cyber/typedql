@@ -40,53 +40,62 @@ module TypedQL.Row
   , withRow
   ) where
 
-import Data.Kind (Type)
+import Data.Kind (Constraint, Type)
 import Data.Proxy (Proxy (..))
 import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 import TypedQL.Schema
 
 -- | Uma linha do esquema @s@.
 --
--- @RCons@ carrega um valor de tipo @Interp t@, ou seja, o tipo Haskell que o
--- esquema manda. Trocar a ordem das colunas ou o tipo de uma delas nao compila.
+-- @RCons@ carrega um valor de tipo @Slot c@: o valor cru se a coluna e
+-- obrigatoria, um 'Maybe' se ela aceita NULL. Trocar a ordem das colunas, o tipo
+-- de uma delas ou a nulabilidade nao compila.
 type Row :: Schema -> Type
 data Row s where
   RNil :: Row '[]
-  RCons :: Interp t -> Row s -> Row ((n := t) : s)
+  RCons :: Slot c -> Row s -> Row (c : s)
 
 infixr 5 `RCons`
 
--- | Prova de que a coluna @n@, de tipo @t@, esta no esquema @s@.
+-- | Prova de que a coluna @c@ esta no esquema @s@.
 --
--- Note que o tipo @t@ aparece no indice do GADT em vez de ser calculado por
--- 'TypeOf'. Isso e proposital: se escrevessemos o resultado como
--- @Interp (TypeOf n s)@, o GHC travaria no caso recursivo, porque com um
--- esquema abstrato ele nao sabe decidir se a cabeca da lista e ou nao a coluna
--- procurada, e as duas equacoes de 'Lookup' ficam empatadas. Carregar @t@ na
--- prova elimina o problema.
-type Index :: Symbol -> SqlType -> Schema -> Type
-data Index n t s where
-  Here :: Index n t ((n := t) : s)
-  There :: Index n t s -> Index n t (c : s)
+-- Note que a prova carrega a coluna inteira, nao apenas o nome. Isso e
+-- proposital: se o tipo de 'getAt' fosse @Index n s -> Row s -> Slot (ColumnOf n s)@,
+-- o GHC travaria no caso recursivo, porque com um esquema abstrato ele nao sabe
+-- decidir se a cabeca da lista e ou nao a coluna procurada, e as duas equacoes de
+-- 'Lookup' ficam empatadas. Carregar a coluna na prova elimina o problema.
+--
+-- Isso vale para a recursao interna. Na fronteira da API ('col') vale o contrario:
+-- ali o esquema e concreto, a familia reduz, e usar 'ColumnOf' produz erro melhor.
+-- Ver a nota em 'col'.
+type Index :: Column -> Schema -> Type
+data Index c s where
+  Here :: Index c (c : s)
+  There :: Index c s -> Index c (d : s)
 
 -- | Constroi a prova por inducao nas instancias.
 --
--- A dependencia funcional @n s -> t@ diz que nome e esquema determinam o tipo,
+-- A dependencia funcional @n s -> c@ diz que nome e esquema determinam a coluna,
 -- e e o que permite escrever @col \@"open_rate" linha@ sem anotar o tipo do
 -- resultado. A instancia geral e OVERLAPPABLE, entao o GHC prefere a primeira
 -- quando a cabeca casa.
-class KnownIndex n t s | n s -> t where
-  index :: Index n t s
+type KnownIndex :: Symbol -> Column -> Schema -> Constraint
+class KnownIndex n c s | n s -> c where
+  index :: Index c s
 
-instance KnownIndex n t ((n := t) : s) where
+instance KnownIndex n (Col n t nl) (Col n t nl : s) where
   index = Here
 
-instance {-# OVERLAPPABLE #-} KnownIndex n t s => KnownIndex n t (c : s) where
-  index = There index
+-- A aplicacao explicita de tipos e necessaria porque o tipo do metodo, @Index c s@,
+-- nao menciona @n@: sem dizer qual coluna estamos procurando, a chamada recursiva
+-- fica ambigua. As variaveis do cabecalho da instancia estao no escopo do corpo
+-- gracas a 'ScopedTypeVariables'.
+instance {-# OVERLAPPABLE #-} KnownIndex n c s => KnownIndex n c (d : s) where
+  index = There (index @n @c @s)
 
 -- | Consome a prova andando na linha. Note que nao existe caso de falha:
 -- a prova garante que a coluna existe, entao o padrao e exaustivo.
-getAt :: Index n t s -> Row s -> Interp t
+getAt :: Index c s -> Row s -> Slot c
 getAt Here (RCons x _) = x
 getAt (There i) (RCons _ r) = getAt i r
 
@@ -95,8 +104,18 @@ getAt (There i) (RCons _ r) = getAt i r
 -- 'AllowAmbiguousTypes' e necessario porque @n@ so aparece na restricao, e
 -- 'TypeApplications' e o que permite escolher a coluna. Custo em runtime: zero,
 -- a prova e apagada na compilacao.
-col :: forall n t s. KnownIndex n t s => Row s -> Interp t
-col = getAt (index @n @t @s)
+--
+-- Se a coluna for nulavel o resultado e um 'Maybe', e nao ha como esquecer disso:
+-- o tipo obriga a tratar.
+--
+-- A coluna e determinada por 'ColumnOf', nao deixada como variavel resolvida pela
+-- dependencia funcional. A diferenca aparece so no caso de erro, e e grande: com
+-- uma variavel, um nome inexistente deixa a coluna ambigua e o GHC reclama da
+-- ambiguidade ("the type variable c0 is ambiguous"), escondendo a causa. Com
+-- 'ColumnOf', a familia nao reduz e dispara a mensagem que diz qual coluna nao
+-- existe e quais existem.
+col :: forall n s. KnownIndex n (ColumnOf n s) s => Row s -> Slot (ColumnOf n s)
+col = getAt (index @n @(ColumnOf n s) @s)
 
 -- | Singleton do esquema inteiro: um valor que espelha a lista de tipos.
 --
@@ -110,8 +129,9 @@ data SSchema s where
     KnownSymbol n =>
     Proxy n ->
     SSqlType t ->
+    SNullability nl ->
     SSchema s ->
-    SSchema ((n := t) : s)
+    SSchema (Col n t nl : s)
 
 -- | Dependencia tipo -> valor, para o esquema completo.
 class KnownSchema s where
@@ -120,21 +140,24 @@ class KnownSchema s where
 instance KnownSchema '[] where
   schemaSing = SEmpty
 
-instance (KnownSymbol n, KnownSqlType t, KnownSchema s) => KnownSchema ((n := t) : s) where
-  schemaSing = SColumn (Proxy @n) (singSqlType @t) (schemaSing @s)
+instance
+  (KnownSymbol n, KnownSqlType t, KnownNullability nl, KnownSchema s) =>
+  KnownSchema (Col n t nl : s)
+  where
+  schemaSing = SColumn (Proxy @n) (singSqlType @t) (singNullability @nl) (schemaSing @s)
 
 -- | Reflexao do esquema: devolve o cabecalho como valores comuns.
-header :: SSchema s -> [(String, SqlType)]
+header :: SSchema s -> [(String, SqlType, Nullability)]
 header SEmpty = []
-header (SColumn p t rest) = (symbolVal p, demote t) : header rest
+header (SColumn p t nl rest) = (symbolVal p, demote t, demoteNull nl) : header rest
 
 -- | Renderiza uma linha percorrendo o singleton do esquema.
 --
 -- Aqui a restricao 'All' do modulo 1 aparece trabalhando: ela produz uma
--- @Show (Interp t)@ para cada coluna, sem que a gente precise listar as colunas.
+-- @Show (Slot c)@ para cada coluna, sem que a gente precise listar as colunas.
 showRow :: All Show s => SSchema s -> Row s -> [String]
 showRow SEmpty RNil = []
-showRow (SColumn _ _ rest) (RCons x xs) = show x : showRow rest xs
+showRow (SColumn _ _ _ rest) (RCons x xs) = show x : showRow rest xs
 
 -- | Existencial de linha, para quando o esquema so e conhecido em runtime
 -- (modulo 6). O eliminador segue a convencao @withX@ das listas.
