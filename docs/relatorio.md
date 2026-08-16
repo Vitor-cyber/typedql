@@ -1,6 +1,6 @@
 # TypedQL: um SGBD relacional cujo esquema vive no nivel de tipos
 
-**Vitor Martins Bueno Lima** | Desenvolvimento Orientado a Tipos | UFABC | 2026 | **Video:** <https://youtu.be/kNeXjRnFuDk>
+**Vitor Martins Bueno Lima** | Desenvolvimento Orientado a Tipos | UFABC | 2026 | **Video (178 s):** <https://youtu.be/kNeXjRnFuDk>
 
 ## Pergunta
 

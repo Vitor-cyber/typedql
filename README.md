@@ -15,7 +15,7 @@ rodar, e a que custo?
 | O que | Onde |
 |---|---|
 | Relatorio, 1 pagina em PDF | [`docs/relatorio.pdf`](docs/relatorio.pdf) |
-| Video da apresentacao, 2:58 | <https://youtu.be/kNeXjRnFuDk> |
+| Video da apresentacao, 178 s | <https://youtu.be/kNeXjRnFuDk> |
 | Codigo da biblioteca, 8 modulos | [`src/TypedQL/`](src/TypedQL) |
 | Consultas que NAO devem compilar | [`negativos/`](negativos) |
 | Diario de desenvolvimento | [`docs/diario.md`](docs/diario.md) |
