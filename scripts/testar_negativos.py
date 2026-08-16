@@ -9,14 +9,24 @@ import subprocess
 import sys
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
-# Em qualquer maquina o `stack` esta no PATH; o caminho fixo e so o fallback
-# da maquina onde o projeto foi escrito, e nao deve ser necessario.
-STACK = shutil.which("stack")
-if STACK is None:
-    _local = pathlib.Path("C:/Users/marvitox/haskell/bin/stack.exe")
-    if not _local.exists():
-        sys.exit("stack nao encontrado no PATH. Instale o Stack: https://haskellstack.org")
-    STACK = str(_local)
+def achar_stack() -> str:
+    """Procura o stack no PATH e nos diretorios de instalacao padrao."""
+    achado = shutil.which("stack")
+    if achado:
+        return achado
+    casa = pathlib.Path.home()
+    candidatos = [
+        casa / "AppData/Roaming/local/bin/stack.exe",  # instalador oficial no Windows
+        casa / ".local/bin/stack",                     # instalador oficial em Linux e macOS
+        casa / "haskell/bin/stack.exe",                # instalacao portatil
+    ]
+    for c in candidatos:
+        if c.exists():
+            return str(c)
+    sys.exit("stack nao encontrado. Instale o Stack: https://haskellstack.org")
+
+
+STACK = achar_stack()
 
 # Nao basta o arquivo ser rejeitado: ele tem que ser rejeitado pelo motivo certo.
 # Um import errado tambem faria o GHC falhar, e o teste passaria por acidente.
