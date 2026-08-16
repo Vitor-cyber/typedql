@@ -10,22 +10,41 @@ runtime (coluna inexistente, tipo incompativel, NULL inesperado, plano fisico
 malformado). Quantos desses o sistema de tipos do Haskell elimina antes de
 rodar, e a que custo?
 
-## Video
+## Entrega
 
-Apresentacao de 3 minutos: https://youtu.be/kNeXjRnFuDk
+| O que | Onde |
+|---|---|
+| Relatorio, 1 pagina em PDF | [`docs/relatorio.pdf`](docs/relatorio.pdf) |
+| Video da apresentacao, 2:58 | <https://youtu.be/kNeXjRnFuDk> |
+| Codigo da biblioteca, 8 modulos | [`src/TypedQL/`](src/TypedQL) |
+| Consultas que NAO devem compilar | [`negativos/`](negativos) |
+| Diario de desenvolvimento | [`docs/diario.md`](docs/diario.md) |
 
 ## Uso
 
 ```
-stack run                                  # demonstracao dos modulos ja feitos
-stack test                                 # testes de valor e de tipo
-python scripts/testar_negativos.py         # consultas que NAO devem compilar
+stack run                                  # demonstracao dos 8 modulos
+stack test                                 # 90 testes de valor
+python scripts/testar_negativos.py         # 14 consultas que NAO devem compilar
 ```
 
-Requer Stack 3.11.1 e GHC 9.6.7 (snapshot lts-22.44). O `stack` baixa o GHC
-sozinho na primeira execucao.
+Requer Stack (testado na 3.11.1) e Python 3. O GHC 9.6.7 e o snapshot
+`lts-22.44` sao baixados pelo proprio `stack` na primeira execucao, o que leva
+alguns minutos. Nao ha dependencia fora de `base`, `containers` e `text`.
 
-### Os testes negativos
+O `stack run` imprime a demonstracao dos oito modulos e termina. Se o terminal
+ficar preso depois do build, o executavel pode ser chamado direto:
+`stack exec typedql`.
+
+## Por onde ler
+
+O argumento do projeto esta em tres arquivos, nesta ordem:
+
+1. [`src/TypedQL/Schema.hs`](src/TypedQL/Schema.hs) - o esquema como tipo, e os singletons escritos a mao.
+2. [`negativos/AbsorcaoEmLeftJoin.hs`](negativos/AbsorcaoEmLeftJoin.hs) - uma reescrita de otimizador que e valida em `INNER JOIN` e errada em `LEFT JOIN`, rejeitada pelo tipo sem nenhuma verificacao escrita.
+3. [`src/TypedQL/Engine.hs`](src/TypedQL/Engine.hs) - o construtor `HashJoin` exige chave `NotNull` nos dois lados, porque em SQL `NULL = NULL` nao e verdadeiro.
+
+## Os testes negativos
 
 A garantia central do projeto e negativa: certas consultas nao existem como
 programa valido. `scripts/testar_negativos.py` compila cada arquivo de
