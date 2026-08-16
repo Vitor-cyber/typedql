@@ -10,6 +10,10 @@ runtime (coluna inexistente, tipo incompativel, NULL inesperado, plano fisico
 malformado). Quantos desses o sistema de tipos do Haskell elimina antes de
 rodar, e a que custo?
 
+## Video
+
+Apresentacao de 3 minutos: https://youtu.be/IK1DGX1zfSM
+
 ## Uso
 
 ```
