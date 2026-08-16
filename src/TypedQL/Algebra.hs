@@ -27,9 +27,10 @@
 -- carrega nenhum valor em runtime. Mas e o suficiente para tornar 'eval'
 -- inaplicavel a um plano logico.
 --
--- Nota de design: 'compile' e trivial por enquanto (so muda o indice de tipo).
--- O modulo 7 vai substituir isso por uma passagem de otimizacao real
--- (catamorfismo sobre 'Fix QueryF').
+-- Nota de design: 'compile' e trivial (so muda o indice de tipo). O modulo 7
+-- ('TypedQL.Optimize') oferece 'compileOtimizado', que passa a arvore por um
+-- catamorfismo de reescrita antes de subir o estagio. 'compile' fica como a
+-- compilacao sem otimizacao, para poder comparar os dois planos.
 module TypedQL.Algebra
   ( -- * Estagios
     Stage (..)
@@ -44,6 +45,8 @@ module TypedQL.Algebra
   , leftJoin
     -- * Compilacao e execucao
   , compile
+  , compileWith
+  , planNode
   , CanExecute
   , eval
     -- * Impressao
@@ -135,6 +138,20 @@ leftJoin p (UnsafeQuery l) (UnsafeQuery r) = UnsafeQuery (LJoin p l r)
 -- predicados, selecao de indice).
 compile :: Query Logical s -> Query Physical s
 compile (UnsafeQuery q) = UnsafeQuery q
+
+-- | O gancho que o modulo 7 usa: aplica uma transformacao na arvore e sobe o
+-- estagio. O tipo e o contrato de corretude do otimizador: a funcao recebe um
+-- plano sobre @s@ e tem que devolver um plano sobre o **mesmo** @s@. Uma
+-- reescrita que mude o esquema do resultado nao e um programa valido.
+--
+-- 'UnsafeQuery' continua privado: nao ha outra forma de chegar a 'Physical'.
+compileWith :: (QueryNode s -> QueryNode s) -> Query Logical s -> Query Physical s
+compileWith f (UnsafeQuery q) = UnsafeQuery (f q)
+
+-- | Abre a consulta para inspecao. Somente leitura: nao existe caminho de volta
+-- de 'QueryNode' para 'Query' fora de 'fromTable' e companhia.
+planNode :: Query st s -> QueryNode s
+planNode (UnsafeQuery q) = q
 
 -- | "Este estagio permite execucao".
 -- A instancia de 'Logical' existe mas o contexto e um 'TypeError': ela nunca pode

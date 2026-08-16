@@ -24,6 +24,8 @@ ESPERADO = {
     "EvalSemCompilar.hs": "ainda nao foi compilada",
     "ProjecaoSqlInexistente.hs": "nao existe neste esquema",
     "AcessoColunaDoExistencial.hs": "ColumnOf",
+    "AbsorcaoEmLeftJoin.hs": "MakeNullable",
+    "OtimizadorMudaEsquema.hs": "Project",
 }
 
 

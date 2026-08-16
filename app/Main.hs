@@ -14,6 +14,7 @@ import TypedQL.Algebra
 import TypedQL.Expr
 import TypedQL.Frontend.Dynamic
 import TypedQL.Frontend.Static (sql)
+import TypedQL.Optimize
 import TypedQL.Row
 import TypedQL.Schema
 
@@ -67,9 +68,14 @@ type Campanhas =
 joinCond :: Predicate (Append Vendors Campanhas)
 joinCond = EEq (colE @"vendor_code") (colE @"camp_vendor")
 
+-- | Um filtro escrito sobre o esquema da juncao, para o modulo 7 absorver na
+-- condicao do INNER JOIN.
+filtroPosJuncao :: Predicate (Append Vendors Campanhas)
+filtroPosJuncao = ELt (ELit 0) (colE @"camp_id")
+
 main :: IO ()
 main = do
-  putStrLn "TypedQL 0.1 - modulos 1 (Schema), 2 (Row), 3 (Expr) e 4 (Algebra)"
+  putStrLn "TypedQL 0.1 - modulos 1 a 7"
   putStrLn ""
   putStrLn "--- modulo 1: Schema ---"
   putStrLn ""
@@ -200,6 +206,43 @@ main = do
   case runDynSQL reg "SELECT taxa FROM vendors" of
     Left err -> putStrLn ("Coluna inexistente -> Left: " ++ err)
     Right _  -> putStrLn "ERRO: deveria ter falhado"
+
+  putStrLn ""
+  putStrLn "--- modulo 7: Optimize ---"
+  putStrLn ""
+  putStrLn "O otimizador e um catamorfismo sobre a arvore de consulta. O tipo de"
+  putStrLn "compileWith obriga a reescrita a devolver um plano sobre o MESMO esquema,"
+  putStrLn "entao um otimizador que muda a forma do resultado nao compila."
+  putStrLn ""
+  let planoIngenuo =
+        select (ELit True) (select filtroCritico (select filtroCritico (fromTable "vendors" tabelaVendors)))
+      fisicoIngenuo = compileOtimizado planoIngenuo
+  putStrLn ("Logico  (" ++ show (tamanhoPlano planoIngenuo) ++ " nos): " ++ renderSQL planoIngenuo)
+  putStrLn ("Fisico  (" ++ show (tamanhoPlano fisicoIngenuo) ++ " nos): " ++ renderSQL fisicoIngenuo)
+  mapM_ (\r -> putStrLn ("  reescrita: " ++ r)) (explicar planoIngenuo)
+  putStrLn
+    ( "  mesmo resultado que sem otimizar: "
+        ++ show (length (eval fisicoIngenuo) == length (eval (compile planoIngenuo)))
+    )
+  putStrLn ""
+  putStrLn "Filtro sobre INNER JOIN vira condicao de juncao (a reescrita classica):"
+  let planoComFiltro =
+        select filtroPosJuncao
+          (innerJoin joinCond (fromTable "vendors" tabelaVendors) (fromTable "campanhas" campanhas))
+      fisicoComFiltro = compileOtimizado planoComFiltro
+  putStrLn ("  Logico: " ++ renderSQL planoComFiltro)
+  putStrLn ("  Fisico: " ++ renderSQL fisicoComFiltro)
+  mapM_ (\r -> putStrLn ("  reescrita: " ++ r)) (explicar planoComFiltro)
+  putStrLn ""
+  putStrLn "Filtro impossivel curto-circuita a subarvore inteira:"
+  let planoImpossivel = select (ELit False) (fromTable "vendors" tabelaVendors)
+  putStrLn ("  Fisico: " ++ renderSQL (compileOtimizado planoImpossivel))
+  putStrLn ("  Linhas lidas: " ++ show (length (eval (compileOtimizado planoImpossivel))))
+  putStrLn ""
+  putStrLn "A reescrita que o tipo PROIBE: absorver o WHERE no ON de um LEFT JOIN."
+  putStrLn "Em SQL isso muda a resposta; aqui o predicado do LEFT JOIN tem tipo"
+  putStrLn "Predicate (Append l r) e o filtro de cima tem Predicate (Append l (MakeNullable r))."
+  putStrLn "Ver negativos/AbsorcaoEmLeftJoin.hs."
 
 mostraColuna :: (String, SqlType, Nullability) -> IO ()
 mostraColuna (nome, tipo, nulabilidade) =

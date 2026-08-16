@@ -17,6 +17,7 @@ import TypedQL.Algebra
 import TypedQL.Expr
 import TypedQL.Frontend.Dynamic
 import TypedQL.Frontend.Static (sql)
+import TypedQL.Optimize
 import TypedQL.Row
 import TypedQL.Schema
 
@@ -313,6 +314,35 @@ main = defaultMain $ testGroup "TypedQL"
           let tbl = SomeTable (schemaSing @DynVendors) []
           in withSomeTable tbl (\sg _ -> length (header sg)) @?= 2
       ]
+  , testGroup "Optimize (catamorfismo de reescrita)"
+      [ testCase "filtros consecutivos fundem em um" $
+          tamanhoPlano (compileOtimizado (select filtroDefeitos (select filtroDefeitos vendorsQ)))
+            @?= 2
+      , testCase "a fusao registra a reescrita" $
+          explicar (select filtroDefeitos (select filtroDefeitos vendorsQ))
+            @?= ["filtros consecutivos fundidos em AND"]
+      , testCase "filtro sempre verdadeiro desaparece do plano" $
+          tamanhoPlano (compileOtimizado (select (ELit True) vendorsQ)) @?= 1
+      , testCase "filtro sempre falso curto-circuita para tabela vazia" $
+          length (eval (compileOtimizado (select (ELit False) vendorsQ))) @?= 0
+      , testCase "filtro sobre INNER JOIN e absorvido na condicao" $
+          explicar (select filtroCampId (innerJoin joinCond vendorsQ campanhasQ))
+            @?= ["filtro absorvido pela condicao do INNER JOIN"]
+      , testCase "absorcao no INNER JOIN encolhe o plano" $
+          tamanhoPlano (compileOtimizado (select filtroCampId (innerJoin joinCond vendorsQ campanhasQ)))
+            @?= 3
+      , testCase "otimizar preserva o resultado da selecao" $
+          map (col @"vendor_code") (eval (compileOtimizado (select filtroDefeitos (select filtroDefeitos vendorsQ))))
+            @?= map (col @"vendor_code") (eval (compile (select filtroDefeitos (select filtroDefeitos vendorsQ))))
+      , testCase "otimizar preserva o resultado da juncao filtrada" $
+          length (eval (compileOtimizado (select filtroCampId (innerJoin joinCond vendorsQ campanhasQ))))
+            @?= length (eval (compile (select filtroCampId (innerJoin joinCond vendorsQ campanhasQ))))
+      , testCase "plano sem nada a reescrever nao registra reescrita" $
+          explicar (select filtroDefeitos vendorsQ) @?= []
+      , testCase "into . out e a identidade na arvore" $
+          renderSQL (compileWith (into . out) (select filtroDefeitos vendorsQ))
+            @?= renderSQL (compile (select filtroDefeitos vendorsQ))
+      ]
   ]
 
 -- Registro de tabelas para os testes do modulo 6.
@@ -330,3 +360,14 @@ registro =
         ]
     )
   ]
+
+-- Fixtures do modulo 7. Reaproveitam 'vendorsQ', 'campanhas' e 'joinCond'.
+campanhasQ :: Query Logical Campanhas
+campanhasQ = fromTable "campanhas" campanhas
+
+-- Filtro simples e nao constante: o otimizador nao pode avaliar em compile time.
+filtroDefeitos :: Predicate Vendors
+filtroDefeitos = ELt (ELit 0) (colE @"defeitos")
+
+filtroCampId :: Predicate (Append Vendors Campanhas)
+filtroCampId = ELt (ELit 0) (colE @"camp_id")

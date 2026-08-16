@@ -51,9 +51,18 @@ esperada (um import errado tambem faria a compilacao falhar). Saida atual:
 [OK] AcessoColunaDoExistencial.hs Could not deduce ... ColumnOf "vendor_code" s
                                   ~ T.Text (s e universal no withSomeTable;
                                   acesso tipado por nome exige esquema concreto.)
+[OK] AbsorcaoEmLeftJoin.hs        Couldn't match type 'Nullable' with 'NotNull'
+                                  (absorver o WHERE no ON e valido em INNER JOIN e
+                                  errado em LEFT JOIN; aqui a reescrita errada nem
+                                  typecheca, porque o predicado do LEFT JOIN vive
+                                  no esquema nao-nulavel do lado direito.)
+[OK] OtimizadorMudaEsquema.hs     Could not deduce s1 ~ s, from s ~ Project ns s1
+                                  (uma reescrita de plano que descarta a projecao
+                                  mudaria o esquema do resultado; o tipo de
+                                  QueryF r s -> r s proibe.)
 ```
 
-10 de 10 rejeitados corretamente.
+12 de 12 rejeitados corretamente.
 
 ## Estado
 
@@ -63,5 +72,5 @@ esperada (um import errado tambem faria a compilacao falhar). Saida atual:
 - [x] Modulo 4: Algebra (algebra relacional com estagios)
 - [x] Modulo 5: Frontend estatico (quasiquoter [sql| ... |] que gera a consulta tipada em compile time)
 - [x] Modulo 6: Frontend dinamico (existencial SomeTable/SomeResult, singleton All Show s, runDynSQL)
-- [ ] Modulo 7: Optimize (catamorfismo)
+- [x] Modulo 7: Optimize (catamorfismo indexado de reescrita, contrato de esquema no tipo)
 - [ ] Modulo 8: Engine (executor indexado)

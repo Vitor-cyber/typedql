@@ -455,7 +455,8 @@ modulo 3. O modulo 7 vai substituir compile por uma passagem de otimizacao real.
   trivialmente, e p ganha o tipo certo via unificacao. Regra que vale generalizar:
   **para nomear existenciais escondidos atras de familias nao injetivas, anote o
   argumento cujo tipo e direto**.
-- **CR no lugar de backslash no patch Python.** Em strings Python, `` e um
+- **CR no lugar de backslash no patch Python.** Em strings Python, `
+` e um
   retorno de carro (0x0D), nao backslash + r. Para escrever um lambda Haskell
   `\r ->` num arquivo via Python, o patch precisa de `\\r ->` no codigo-fonte
   Python (quatro barras). Ou melhor: fazer o patch em bytes (`b"\r ->"`) para
@@ -602,3 +603,119 @@ Ao fim do modulo 6: 66 testes positivos, 10 negativos, zero warning. Cada
 modulo adicionou uma camada: o tipo garante o esquema (1), as linhas (2), as
 expressoes (3), a algebra (4), o SQL estatico (5) e, agora, a fronteira com o
 mundo dinamico (6), onde as garantias migram do compilador para o Either.
+
+## Modulo 7: Optimize (catamorfismo indexado)
+
+### Pergunta
+Um otimizador de consultas e um programa que reescreve arvores. E a parte de um
+SGBD onde os bugs custam mais caro, porque um plano reescrito errado nao trava:
+ele devolve a resposta errada, silenciosamente. Quanto dessa classe de bug o
+sistema de tipos elimina?
+
+### Resposta: o contrato esta na assinatura
+O gancho que o modulo 4 abriu e
+
+```haskell
+compileWith :: (QueryNode s -> QueryNode s) -> Query Logical s -> Query Physical s
+```
+
+O `s` e o mesmo dos dois lados. Uma reescrita que perca uma projecao, troque a
+ordem das colunas de uma juncao ou esqueca que um LEFT JOIN torna o lado direito
+nulavel nao e um programa valido. O otimizador nao precisa de teste para isso,
+precisa de compilador. O negativo `OtimizadorMudaEsquema.hs` e exatamente essa
+tentativa: descartar o `PickF` e devolver o filho. O GHC responde
+`Could not deduce s1 ~ s, from the context s ~ Project ns s1`.
+
+### O achado do modulo: a reescrita errada nao typecheca
+Em SQL,
+
+```sql
+SELECT * FROM a INNER JOIN b ON p WHERE q
+```
+
+e equivalente a `... ON (p AND q)`. Com LEFT JOIN a mesma reescrita esta errada:
+mover o `q` para o `ON` muda quais linhas do lado esquerdo ganham NULL em vez de
+serem descartadas. Todo livro de banco de dados avisa; todo otimizador de verdade
+tem um caso especial escrito a mao para isso.
+
+Aqui nao ha caso especial e nao ha aviso. O predicado de um LEFT JOIN tem tipo
+`Predicate (Append l r)` (ele e avaliado contra as linhas reais, antes de decidir
+se houve correspondencia) e o filtro acima dele tem tipo
+`Predicate (Append l (MakeNullable r))`. Sao tipos diferentes, entao `EAnd` nao
+os aceita e a reescrita errada simplesmente nao existe. A semantica do SQL virou
+um erro de tipo. Ver `negativos/AbsorcaoEmLeftJoin.hs`:
+
+```
+Couldn't match type 'Nullable' with 'NotNull'
+  Expected: Expr (Append l0 r0) TBool NotNull
+    Actual: Predicate (Append A (MakeNullable B))
+```
+
+Essa foi a hora em que a tese do projeto ficou concreta para mim. Nao e que o
+tipo "documenta" a regra: e que a regra deixou de precisar ser lembrada.
+
+### O catamorfismo
+`QueryNode` e recursivo e indexado por `Schema`, logo o funtor base tambem tem
+que ser indexado. `QueryF r s` e uma camada da arvore com um buraco
+`r :: Schema -> Type` no lugar dos filhos, e o `fmap` dela e uma transformacao
+natural, nao uma funcao comum:
+
+```haskell
+hmap  :: (forall x. f x -> g x) -> QueryF f s -> QueryF g s
+hcata :: (forall x. QueryF g x -> g x) -> QueryNode s -> g s
+hcata alg = alg . hmap (hcata alg) . out
+```
+
+O `forall x` nao e generalidade gratuita: os filhos de uma juncao tem indices
+existenciais (`l` e `r` nao aparecem no indice do resultado, porque `Append` e
+`MakeNullable` os consomem), entao a funcao aplicada aos filhos precisa funcionar
+para um esquema que nao tem nome.
+
+Nao foi preciso um `Fix`: `QueryNode` **ja e** o ponto fixo de `QueryF`, e o par
+`out` / `into` e a testemunha do isomorfismo. Ha um teste positivo para isso
+(`into . out` e a identidade sobre o plano).
+
+As reescritas implementadas, todas locais, todas descobrindo composicao de graca
+porque o catamorfismo sobe de baixo para cima:
+
+| Regra | Efeito |
+| --- | --- |
+| filtro sempre verdadeiro | o no desaparece |
+| filtro sempre falso | a subarvore inteira vira `Table "vazio" []` |
+| filtros consecutivos | fundem num `AND` |
+| filtro sobre INNER JOIN | absorvido pela condicao de juncao |
+
+O carregador do catamorfismo e `Otimizado s`, que leva o plano novo mais o log das
+reescritas aplicadas. Como o `s` do plano e o mesmo `s` do `Otimizado`, o log nao
+tem como se referir a um plano de outro esquema.
+
+### Dificuldades e surpresas
+- **Kind do carregador.** `hcata` exige carregador de kind `Schema -> Type`. A
+  metrica `tamanhoPlano` queria devolver um `Int`, e `Int` nao serve: precisou de
+  um `newtype Contagem s = Contagem Int` com assinatura de kind explicita
+  (`type Contagem :: Schema -> Type`). Sem a assinatura o GHC infere `* -> *` e
+  reclama `Couldn't match kind '*' with '[Column]'`. Um newtype que ignora o
+  proprio indice, so para ter o kind certo.
+- **`EAnd` de dois predicados totais.** `EAnd p q` tem nulabilidade
+  `MergeNull NotNull NotNull`. A familia reduz pela primeira equacao, entao o
+  resultado e `Predicate s` sem precisar de coercao. Foi de graca, mas so porque
+  a familia foi escrita fechada e com a equacao especifica antes do curinga
+  (decisao do modulo 3 pagando juros aqui).
+- **Refinamento de GADT dentro de tupla.** A primeira versao de `reescreveFiltro`
+  casava `(constante p, filho)` numa tupla. Reescrevi como `case` aninhado: o
+  refinamento de tipo do padrao GADT fica mais legivel, e o codigo diz na ordem
+  certa que a avaliacao constante tem prioridade sobre a fusao.
+- **`compile` nao foi removido.** O modulo 4 prometia que o 7 substituiria
+  `compile`. Preferi manter os dois: `compile` como a compilacao sem otimizacao e
+  `compileOtimizado` como a com. Isso deixou os testes de equivalencia possiveis
+  ("otimizar preserva o resultado"), que sao a unica garantia que o tipo **nao**
+  da: o tipo garante que o esquema nao muda, nao que as linhas nao mudam.
+
+### Negativos que passaram a existir
+- `negativos/AbsorcaoEmLeftJoin.hs`: absorver o WHERE no ON de um LEFT JOIN.
+  Rejeitado por `Couldn't match type 'Nullable' with 'NotNull'`.
+- `negativos/OtimizadorMudaEsquema.hs`: reescrita que descarta a projecao.
+  Rejeitado por `Could not deduce s1 ~ s`.
+
+### Contagem parcial
+Ao fim do modulo 7: 76 testes positivos, 12 negativos, zero warning.
