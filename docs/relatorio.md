@@ -1,6 +1,6 @@
 # TypedQL: um SGBD relacional cujo esquema vive no nivel de tipos
 
-**Vitor Martins Bueno Lima** | Desenvolvimento Orientado a Tipos | UFABC | 2026
+**Vitor Martins Bueno Lima** | Desenvolvimento Orientado a Tipos | UFABC | 2026 | **Video:** <https://youtu.be/kNeXjRnFuDk>
 
 ## Pergunta
 
@@ -79,4 +79,4 @@ o tipo nao captura ordem de linhas: o `flip` em `M.fromListWith (flip (++))` e a
 diferenca entre a saida do hash join casar ou nao com a do laco aninhado, e
 nenhum tipo reclamaria. **O sistema de tipos elimina a classe estrutural de
 erros; a observacional continua sendo trabalho de teste.** Reproduzir:
-`stack test` e `python scripts/testar_negativos.py`. Video: https://youtu.be/IK1DGX1zfSM
+`stack test` e `python scripts/testar_negativos.py`. Video: <https://youtu.be/kNeXjRnFuDk>

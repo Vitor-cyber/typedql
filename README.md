@@ -12,7 +12,7 @@ rodar, e a que custo?
 
 ## Video
 
-Apresentacao de 3 minutos: https://youtu.be/IK1DGX1zfSM
+Apresentacao de 3 minutos: https://youtu.be/kNeXjRnFuDk
 
 ## Uso
 
