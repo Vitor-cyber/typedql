@@ -14,6 +14,7 @@ import TypedQL.Algebra
 import TypedQL.Expr
 import TypedQL.Frontend.Dynamic
 import TypedQL.Frontend.Static (sql)
+import TypedQL.Engine
 import TypedQL.Optimize
 import TypedQL.Row
 import TypedQL.Schema
@@ -75,7 +76,7 @@ filtroPosJuncao = ELt (ELit 0) (colE @"camp_id")
 
 main :: IO ()
 main = do
-  putStrLn "TypedQL 0.1 - modulos 1 a 7"
+  putStrLn "TypedQL 0.1 - modulos 1 a 8"
   putStrLn ""
   putStrLn "--- modulo 1: Schema ---"
   putStrLn ""
@@ -243,6 +244,42 @@ main = do
   putStrLn "Em SQL isso muda a resposta; aqui o predicado do LEFT JOIN tem tipo"
   putStrLn "Predicate (Append l r) e o filtro de cima tem Predicate (Append l (MakeNullable r))."
   putStrLn "Ver negativos/AbsorcaoEmLeftJoin.hs."
+
+  putStrLn ""
+  putStrLn "--- modulo 8: Engine ---"
+  putStrLn ""
+  putStrLn "Operadores fisicos indexados pelo esquema que produzem. O EXPLAIN mostra"
+  putStrLn "o algoritmo escolhido, nao o SQL equivalente."
+  putStrLn ""
+  let planoParaExecutar =
+        select filtroPosJuncao
+          (innerJoin joinCond (fromTable "vendors" tabelaVendors) (fromTable "campanhas" campanhas))
+  putStr (explainPlano (compileOtimizado planoParaExecutar))
+  putStrLn ""
+  putStrLn ""
+  putStrLn "O mesmo resultado por hash join, pedido explicitamente. As chaves vao por"
+  putStrLn "aplicacao de tipo, e o construtor exige que as duas sejam NotNull e do"
+  putStrLn "mesmo tipo SQL:"
+  putStrLn ""
+  -- Tabelas replicadas: com 2x2 linhas o produto e a soma empatam (2*2 = 2+2) e a
+  -- diferenca entre os dois algoritmos nao aparece.
+  let vendorsMuitos = concat (replicate 25 tabelaVendors)
+      campanhasMuitas = concat (replicate 25 campanhas)
+      opLaco = NLJoin joinCond (scan "vendors" vendorsMuitos) (scan "campanhas" campanhasMuitas)
+      opHash = hashJoin @"vendor_code" @"camp_vendor" (scan "vendors" vendorsMuitos) (scan "campanhas" campanhasMuitas)
+  putStr (explainOp opHash)
+  putStrLn ""
+  putStrLn ("  laco aninhado: " ++ show (estimar opLaco))
+  putStrLn ("  hash join:     " ++ show (estimar opHash))
+  putStrLn
+    ( "  mesmo resultado: "
+        ++ show (map (col @"camp_id") (runOp opHash) == map (col @"camp_id") (runOp opLaco))
+    )
+  putStrLn ""
+  putStrLn "Por que o hash join precisa de chave NotNull: em SQL, NULL = NULL nao e"
+  putStrLn "verdadeiro, entao linha de chave NULL nunca casa. Um hash join ingenuo"
+  putStrLn "coloca o NULL no balde e devolve linhas que nao existem. Aqui o operador"
+  putStrLn "com chave nulavel nao pode ser construido: negativos/HashJoinChaveNulavel.hs."
 
 mostraColuna :: (String, SqlType, Nullability) -> IO ()
 mostraColuna (nome, tipo, nulabilidade) =

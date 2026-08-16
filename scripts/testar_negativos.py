@@ -26,6 +26,8 @@ ESPERADO = {
     "AcessoColunaDoExistencial.hs": "ColumnOf",
     "AbsorcaoEmLeftJoin.hs": "MakeNullable",
     "OtimizadorMudaEsquema.hs": "Project",
+    "HashJoinChaveNulavel.hs": "NotNull",
+    "HashJoinChavesIncompativeis.hs": "TInt",
 }
 
 

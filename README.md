@@ -60,9 +60,16 @@ esperada (um import errado tambem faria a compilacao falhar). Saida atual:
                                   (uma reescrita de plano que descarta a projecao
                                   mudaria o esquema do resultado; o tipo de
                                   QueryF r s -> r s proibe.)
+[OK] HashJoinChaveNulavel.hs      Couldn't match type 'Nullable' with 'NotNull'
+                                  (hash join com chave que aceita NULL: em SQL
+                                  NULL = NULL nao e verdadeiro, entao o operador
+                                  devolveria linhas que nao existem.)
+[OK] HashJoinChavesIncompativeis  Couldn't match type 'TInt' with 'TText'
+                                  (sondar uma tabela de hash de Text com chave
+                                  Int; o construtor usa o mesmo t nas duas.)
 ```
 
-12 de 12 rejeitados corretamente.
+14 de 14 rejeitados corretamente.
 
 ## Estado
 
@@ -73,4 +80,4 @@ esperada (um import errado tambem faria a compilacao falhar). Saida atual:
 - [x] Modulo 5: Frontend estatico (quasiquoter [sql| ... |] que gera a consulta tipada em compile time)
 - [x] Modulo 6: Frontend dinamico (existencial SomeTable/SomeResult, singleton All Show s, runDynSQL)
 - [x] Modulo 7: Optimize (catamorfismo indexado de reescrita, contrato de esquema no tipo)
-- [ ] Modulo 8: Engine (executor indexado)
+- [x] Modulo 8: Engine (operadores fisicos indexados, hash join com chave NotNull exigida pelo tipo, EXPLAIN, modelo de custo)

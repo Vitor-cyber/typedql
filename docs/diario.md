@@ -719,3 +719,129 @@ tem como se referir a um plano de outro esquema.
 
 ### Contagem parcial
 Ao fim do modulo 7: 76 testes positivos, 12 negativos, zero warning.
+
+## Modulo 8: Engine (operadores fisicos indexados)
+
+### Pergunta
+O modulo 4 ja executa consultas, mas de um jeito so: laco aninhado para tudo. Um
+SGBD de verdade **escolhe algoritmo**, e e nessa escolha que o otimizador erra
+feio. Quanto dessa escolha o tipo consegue vigiar?
+
+### Resposta: as pre-condicoes do algoritmo sao as restricoes do construtor
+`PhysOp s` e a arvore de operadores fisicos. A diferenca em relacao a `QueryNode`
+e que aqui o algoritmo esta escolhido: `NLJoin` e `HashJoin` produzem o mesmo
+esquema por caminhos diferentes, e as restricoes de cada construtor dizem o que
+ele precisa para funcionar.
+
+```haskell
+NLJoin :: Disjoint l r => Predicate (Append l r) -> PhysOp l -> PhysOp r -> PhysOp (Append l r)
+
+HashJoin ::
+  ( Disjoint l r
+  , KnownIndex kl (ColumnOf kl l) l
+  , KnownIndex kr (ColumnOf kr r) r
+  , ColumnOf kl l ~ Col kl t NotNull
+  , ColumnOf kr r ~ Col kr t NotNull
+  , Ord (Interp t)
+  ) => Proxy kl -> Proxy kr -> PhysOp l -> PhysOp r -> PhysOp (Append l r)
+```
+
+O laco aninhado aceita qualquer predicado e custa o produto. O hash join custa a
+soma, e paga por isso com tres exigencias que num SGBD comum sao checadas em
+runtime, ou nao sao checadas:
+
+1. as duas colunas de chave existem, cada uma **no seu lado** (as duas provas
+   `KnownIndex`);
+2. elas tem o mesmo tipo SQL (o mesmo `t` nas duas equacoes);
+3. nenhuma das duas aceita NULL (`NotNull` nas duas).
+
+### O item 3 e o que interessa
+Em SQL, `NULL = NULL` nao e verdadeiro. Uma linha com chave NULL nunca casa com
+nada. Um hash join implementado sem cuidado coloca o NULL na tabela de hash,
+encontra a correspondencia e devolve linhas que a semantica do SQL diz que nao
+existem. E um bug silencioso: nao trava, so responde errado.
+
+Aqui o operador que erraria nao pode ser construido. `negativos/HashJoinChaveNulavel.hs`:
+
+```
+Couldn't match type 'Nullable' with 'NotNull'
+  arising from a use of 'hashJoin'
+```
+
+Junto com o achado do modulo 7 (absorver o WHERE no ON de um LEFT JOIN nao
+typecheca), esses dois casos sao a melhor resposta que o projeto tem para a
+pergunta inicial: nao e que o tipo documente a regra do livro, e que a regra
+deixou de precisar ser lembrada.
+
+### O executor nao checa nada
+`runOp` e curto e nao tem uma unica validacao. O caso do `HashJoin` usa
+`col @kr` sem verificar se a coluna existe, e usa o valor direto como chave de
+`Map` sem desembrulhar `Maybe`, porque o tipo garantiu `NotNull` na construcao.
+As restricoes que o construtor guarda sao exatamente o que o algoritmo consome:
+os dicionarios foram empacotados na hora em que o operador foi criado, e o
+executor so os desempacota.
+
+### O planejador e o terceiro catamorfismo
+`planejar :: QueryNode s -> PhysOp s` reusa o `hcata` do modulo 7 trocando o
+carregador por `PhysOp`. Foi de graca: o catamorfismo foi escrito para o
+otimizador e serviu para o planejador sem mudanca nenhuma.
+
+### A dificuldade real: a prova nao se quebra em duas
+Eu queria que `planejar` reconhecesse `ON (a = b)` e promovesse automaticamente
+para hash join. **Nao typecheca**, e a razao e o ponto mais fino que encontrei no
+projeto inteiro.
+
+Quando casamos o padrao `EEq (ECol pa) (ECol pb)` num `Predicate (Append l r)`, os
+dicionarios que o `ECol` carrega sao provas de pertinencia no esquema **junto**:
+`KnownIndex a (Col a t nl) (Append l r)`. O `HashJoin` precisa de provas em cada
+lado separado: `KnownIndex kl (ColumnOf kl l) l`. E nao existe funcao que quebre a
+primeira prova nas duas outras, porque a informacao de qual lado a coluna veio foi
+apagada por `Append`. O tipo `Predicate (Append l r)` sabe que a coluna esta em
+algum lugar da concatenacao; ele nao sabe em qual metade.
+
+Para recuperar isso seria preciso indexar o predicado pelos dois esquemas de
+origem em vez de pelo concatenado, algo como `Predicate2 l r`, com um construtor
+de coluna por lado. Seria uma reescrita do modulo 3 e nao caberia no prazo. A
+decisao foi deixar o hash join como algo que o usuario pede explicitamente
+(`hashJoin @"vendor_code" @"camp_vendor"`), com o tipo conferindo as chaves, e
+documentar o limite. E uma limitacao honesta: **o tipo garante que o hash join
+escrito esta correto, nao que o planejador vai descobri-lo sozinho.**
+
+### EXPLAIN e modelo de custo
+`explainOp` imprime a arvore fisica mostrando o algoritmo, nao o SQL equivalente:
+
+```
+-> HashJoin vendor_code = camp_vendor (chaves NotNull garantidas pelo tipo)
+  -> Scan vendors (50 linhas)
+  -> Scan campanhas (50 linhas)
+```
+
+`estimar` devolve `Estimativa { linhasEstimadas, comparacoes }`. E deliberadamente
+pessimista (um filtro estima que nada e filtrado): o objetivo nao e um otimizador
+baseado em custo de verdade, e mostrar a diferenca assintotica. Com 50 linhas de
+cada lado, laco aninhado faz 2500 comparacoes e hash join faz 100. Com 2 linhas de
+cada lado os dois empatam (2*2 = 2+2), o que virou um teste proprio, porque foi
+justamente o caso que fez o primeiro teste de custo falhar.
+
+### Detalhe de implementacao que quase passou
+`M.fromListWith (flip (++))`, nao `(++)`. A funcao de combinacao recebe o valor
+novo e o antigo nessa ordem, entao sem o `flip` cada balde da tabela de hash sai
+invertido e a ordem das linhas de saida deixa de coincidir com a do laco aninhado.
+Existe um teste so para isso ("hash join preserva a ordem das linhas da esquerda"),
+que e o tipo de coisa que o sistema de tipos **nao** pega: ordem de linhas nao esta
+no esquema.
+
+### Negativos que passaram a existir
+- `negativos/HashJoinChaveNulavel.hs`: chave que aceita NULL.
+  `Couldn't match type 'Nullable' with 'NotNull'`.
+- `negativos/HashJoinChavesIncompativeis.hs`: chaves de tipos SQL diferentes.
+  `Couldn't match type 'TInt' with 'TText'`.
+
+Os dois precisaram de anotacao explicita nos operandos (`scan "a" [] :: PhysOp A`).
+Sem ela, `Append` nao e injetiva, o GHC nao consegue determinar `l` e `r` a partir
+do tipo de retorno e reclama de ambiguidade em vez de reclamar da chave. O arquivo
+seria rejeitado, mas pelo motivo errado, e o `scripts/testar_negativos.py` pegou
+isso exatamente como foi projetado para pegar.
+
+### Contagem final
+Ao fim do modulo 8: 90 testes positivos, 14 negativos, zero warning.

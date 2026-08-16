@@ -17,6 +17,7 @@ import TypedQL.Algebra
 import TypedQL.Expr
 import TypedQL.Frontend.Dynamic
 import TypedQL.Frontend.Static (sql)
+import TypedQL.Engine
 import TypedQL.Optimize
 import TypedQL.Row
 import TypedQL.Schema
@@ -343,6 +344,45 @@ main = defaultMain $ testGroup "TypedQL"
           renderSQL (compileWith (into . out) (select filtroDefeitos vendorsQ))
             @?= renderSQL (compile (select filtroDefeitos vendorsQ))
       ]
+  , testGroup "Engine (operadores fisicos indexados)"
+      [ testCase "hash join devolve o mesmo que laco aninhado" $
+          map (col @"camp_id") (runOp opHashJoin) @?= map (col @"camp_id") (runOp opNLJoin)
+      , testCase "hash join preserva a ordem das linhas da esquerda" $
+          map (col @"vendor_code") (runOp opHashJoin) @?= map (col @"vendor_code") (runOp opNLJoin)
+      , testCase "hash join descarta o lado esquerdo sem correspondencia" $
+          length (runOp opHashJoin) @?= 2
+      , testCase "com 2x2 linhas os dois algoritmos empatam (2*2 = 2+2)" $
+          comparacoes (estimar opHashJoin) @?= comparacoes (estimar opNLJoin)
+      , testCase "hash join custa a soma, laco aninhado custa o produto" $
+          (comparacoes (estimar opHashJoinGrande), comparacoes (estimar opNLJoinGrande))
+            @?= (20 + 20, 20 * 20)
+      , testCase "estimativa de uma varredura nao faz comparacao" $
+          estimar (scan "vendors" tabelaVendors) @?= Estimativa 2 0
+      , testCase "executar concorda com eval do modulo 4" $
+          map (col @"vendor_code") (executar (compile (select filtroDefeitos vendorsQ)))
+            @?= map (col @"vendor_code") (eval (compile (select filtroDefeitos vendorsQ)))
+      , testCase "executar concorda com eval numa juncao" $
+          length (executar (compile (innerJoin joinCond vendorsQ campanhasQ)))
+            @?= length (eval (compile (innerJoin joinCond vendorsQ campanhasQ)))
+      , testCase "executar concorda com eval num left join" $
+          length (executar (compile (leftJoin joinCond vendorsQ campanhasQ)))
+            @?= length (eval (compile (leftJoin joinCond vendorsQ campanhasQ)))
+      , testCase "planejar preserva o resultado depois de otimizar" $
+          length (executar (compileOtimizado (select filtroCampId (innerJoin joinCond vendorsQ campanhasQ))))
+            @?= length (eval (compile (select filtroCampId (innerJoin joinCond vendorsQ campanhasQ))))
+      , testCase "planejar escolhe laco aninhado para juncao logica" $
+          assertBool "EXPLAIN menciona NestedLoopJoin"
+            ("NestedLoopJoin" `isInfixOf` explainOp (planejar (planNode (innerJoin joinCond vendorsQ campanhasQ))))
+      , testCase "EXPLAIN de um hash join identifica o algoritmo e as chaves" $
+          assertBool "EXPLAIN menciona HashJoin vendor_code = camp_vendor"
+            ("HashJoin vendor_code = camp_vendor" `isInfixOf` explainOp opHashJoin)
+      , testCase "EXPLAIN mostra a arvore com Filter acima do Scan" $
+          assertBool "Filter antes de Scan"
+            ("Filter" `isInfixOf` explainOp (planejar (planNode (select filtroDefeitos vendorsQ))))
+      , testCase "rodar encadeia otimizacao, planejamento e execucao" $
+          length (rodar compileOtimizado (select filtroDefeitos (select filtroDefeitos vendorsQ)))
+            @?= length (eval (compile (select filtroDefeitos vendorsQ)))
+      ]
   ]
 
 -- Registro de tabelas para os testes do modulo 6.
@@ -371,3 +411,32 @@ filtroDefeitos = ELt (ELit 0) (colE @"defeitos")
 
 filtroCampId :: Predicate (Append Vendors Campanhas)
 filtroCampId = ELt (ELit 0) (colE @"camp_id")
+
+-- Fixtures do modulo 8. As duas chaves sao NotNull e do mesmo tipo SQL (TText),
+-- que e exatamente o que o construtor de HashJoin exige.
+opVendors :: PhysOp Vendors
+opVendors = scan "vendors" tabelaVendors
+
+opCampanhas :: PhysOp Campanhas
+opCampanhas = scan "campanhas" campanhas
+
+opHashJoin :: PhysOp (Append Vendors Campanhas)
+opHashJoin = hashJoin @"vendor_code" @"camp_vendor" opVendors opCampanhas
+
+opNLJoin :: PhysOp (Append Vendors Campanhas)
+opNLJoin = NLJoin joinCond opVendors opCampanhas
+
+-- Mesmas tabelas replicadas 10 vezes (20 linhas de cada lado). Com 2x2 o produto e
+-- a soma coincidem, entao a diferenca assintotica entre os algoritmos so aparece
+-- com entradas maiores.
+opVendorsGrande :: PhysOp Vendors
+opVendorsGrande = scan "vendors_grande" (concat (replicate 10 tabelaVendors))
+
+opCampanhasGrande :: PhysOp Campanhas
+opCampanhasGrande = scan "campanhas_grande" (concat (replicate 10 campanhas))
+
+opHashJoinGrande :: PhysOp (Append Vendors Campanhas)
+opHashJoinGrande = hashJoin @"vendor_code" @"camp_vendor" opVendorsGrande opCampanhasGrande
+
+opNLJoinGrande :: PhysOp (Append Vendors Campanhas)
+opNLJoinGrande = NLJoin joinCond opVendorsGrande opCampanhasGrande
