@@ -8,12 +8,14 @@
 
 module Main (main) where
 
+import Data.List (isInfixOf)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import Test.Tasty
 import Test.Tasty.HUnit
 import TypedQL.Algebra
 import TypedQL.Expr
+import TypedQL.Frontend.Dynamic
 import TypedQL.Frontend.Static (sql)
 import TypedQL.Row
 import TypedQL.Schema
@@ -283,4 +285,48 @@ main = defaultMain $ testGroup "TypedQL"
           renderSQL [sql| SELECT vendor_code FROM vendorsQ WHERE vendor_code = "VFAKE" |]
             @?= "SELECT vendor_code FROM (SELECT * FROM (vendors) WHERE (vendor_code = \"VFAKE\"))"
       ]
+  , testGroup "Frontend.Dynamic (existencial + singleton)"
+      [ testCase "SELECT * devolve todas as linhas" $
+          fmap dynRowCount (runDynSQL registro "SELECT * FROM vendors") @?= Right 2
+      , testCase "dynHeader reflete o esquema completo no SELECT *" $
+          fmap (map (\(n,_,_)->n) . dynHeader) (runDynSQL registro "SELECT * FROM vendors")
+            @?= Right ["vendor_code", "open_rate"]
+      , testCase "SELECT lista projeta colunas na observacao" $
+          fmap dynRows (runDynSQL registro "SELECT vendor_code FROM vendors")
+            @?= Right [["\"VFAKE\""], ["\"FAKEV\""]]
+      , testCase "WHERE filtra linhas em runtime" $
+          fmap dynRowCount (runDynSQL registro "SELECT * FROM vendors WHERE vendor_code = \"VFAKE\"")
+            @?= Right 1
+      , testCase "dynHeader com SELECT lista mostra so as colunas pedidas" $
+          fmap (map (\(n,_,_)->n) . dynHeader)
+               (runDynSQL registro "SELECT vendor_code FROM vendors")
+            @?= Right ["vendor_code"]
+      , testCase "tabela nao encontrada devolve Left" $
+          case runDynSQL registro "SELECT * FROM inexistente" of
+            Left msg -> assertBool "mensagem menciona tabela" ("inexistente" `isInfixOf` msg)
+            Right _  -> assertFailure "deveria ter falhado"
+      , testCase "coluna inexistente no SELECT devolve Left" $
+          case runDynSQL registro "SELECT taxa FROM vendors" of
+            Left msg -> assertBool "mensagem menciona coluna" ("taxa" `isInfixOf` msg)
+            Right _  -> assertFailure "deveria ter falhado"
+      , testCase "withSomeTable permite observar o esquema sem conhecer s" $
+          let tbl = SomeTable (schemaSing @DynVendors) []
+          in withSomeTable tbl (\sg _ -> length (header sg)) @?= 2
+      ]
+  ]
+
+-- Registro de tabelas para os testes do modulo 6.
+-- SomeTable empacota a tabela com seu singleton.
+type DynVendors :: Schema
+type DynVendors = ["vendor_code" := TText, "open_rate" := TDouble]
+
+registro :: [(String, SomeTable)]
+registro =
+  [ ( "vendors"
+    , SomeTable
+        (schemaSing @DynVendors)
+        [ RCons "VFAKE" (RCons 0.42 RNil)
+        , RCons "FAKEV" (RCons 0.08 RNil)
+        ]
+    )
   ]

@@ -538,3 +538,67 @@ entao um `let vendorsQ = ...` no mesmo bloco funciona.
 Ao fim do modulo 5: 58 testes positivos, 9 negativos, zero warning. O frontend de
 SQL nao abriu nenhuma brecha: toda garantia dos modulos anteriores atravessa o
 quasiquoter, porque ele so gera o codigo que o GHC ja sabia verificar.
+
+## Modulo 6: Frontend.Dynamic (existenciais e singletons)
+
+### A pergunta
+O modulo 5 sabia tudo em compile time: a string SQL era uma literal no
+codigo-fonte, o quasiquoter a processava antes da compilacao, e o GHC verificava
+o resultado. O que acontece quando a string so existe em runtime -- quando ela
+vem de um arquivo, de um parametro, de uma entrada do usuario? E possivel executar
+consultas dinamicas e ainda manter qualquer garantia de corretude?
+
+### A resposta: existencial + singleton
+A solucao e empacotar o esquema num existencial ('SomeTable', 'SomeResult') e
+carregar dentro do construtor duas coisas que seriam necessarias em runtime:
+
+1. O singleton 'SSchema s': permite chamar 'header' e 'showRow' sem conhecer o
+   tipo 's' estaticamente. Sem o singleton, nao ha como percorrer as colunas.
+2. A prova 'All Show s': 'showRow' exige que cada 'Slot col' tenha instancia
+   'Show'. Guardando a prova no existencial, ela volta ao escopo quando o padrao
+   e casado, e 'showRow' pode ser chamado normalmente dentro do eliminador.
+
+O tipo de fora -- 'SomeTable' e 'SomeResult' -- nao menciona 's'; quem recebe
+esses valores so pode usar os observadores ('dynHeader', 'dynRows', 'dynRowCount')
+ou o eliminador ('withSomeTable', 'withSomeResult'). Nao da para chamar
+'col @"vendor_code"' num resultado dinamico porque o GHC nao sabe que 's' tem
+essa coluna: so teria se a chamada fosse verificada contra um esquema estatico.
+
+### O contraste com o modulo 5
+| Dimensao                 | Modulo 5 (estatico)         | Modulo 6 (dinamico)       |
+|--------------------------|-----------------------------|-----------------------------|
+| SQL                      | literal no codigo-fonte     | string em runtime           |
+| Erros de nome de coluna  | erro de compilacao          | Left em runtime             |
+| Acesso a colunas         | col @"nome", verificado     | somente via observadores    |
+| Tipo do resultado        | Query Logical s (s = tipo)  | SomeResult (s escondido)    |
+
+A garantia nao desaparece; ela muda de lugar: do tipo para o 'Either'.
+
+### Dificuldades e surpresas
+- **'All Show s' no existencial.** A primeira versao nao guardava o constraint.
+  'showRow' falhou com "Could not solve: All Show s" porque dentro do pattern
+  match em 'SomeTable sg rows', o GHC so sabe que 'sg :: SSchema s' e
+  'rows :: [Row s]', mas nao que 'All Show s' vale para esse 's' especifico.
+  A correcao foi adicionar 'All Show s' ao existencial e a todos os eliminadores.
+  Isso tambem exigiu o pragma 'ConstraintKinds' em Dynamic.hs (familia 'All' devolve
+  um 'Constraint', que precisa de 'ConstraintKinds' para aparecer em contextos).
+- **Parser extraido para Parser.hs.** Para evitar duplicacao, o tokenizador e o
+  analisador foram extraidos do Static.hs para um modulo compartilhado
+  'TypedQL.Frontend.Parser'. Static e Dynamic importam dele.
+- **Comparacao via 'show'.** O filtro WHERE avalia comparando strings: extrai o
+  valor com 'showRow', serializa o literal com 'show', e compara. Funciona porque
+  'show' e consistente: 'show (T.pack "VFAKE")' e 'show "VFAKE"' (String) produzem
+  a mesma saida '"VFAKE"'. E uma limitacao documentada: o tipo SQL real da coluna
+  nao e verificado em compile time no filtro dinamico.
+
+### Negativo que passou a existir
+- 'negativos/AcessoColunaDoExistencial.hs': tentativa de usar
+  'col @"vendor_code"' dentro de 'withSomeTable'. Rejeitado com:
+  'Could not deduce ... ColumnOf "vendor_code" s ... ~ T.Text'
+  porque 's' e universal na continuacao; o GHC nao sabe que 's' tem a coluna.
+
+### Contagem parcial
+Ao fim do modulo 6: 66 testes positivos, 10 negativos, zero warning. Cada
+modulo adicionou uma camada: o tipo garante o esquema (1), as linhas (2), as
+expressoes (3), a algebra (4), o SQL estatico (5) e, agora, a fronteira com o
+mundo dinamico (6), onde as garantias migram do compilador para o Either.

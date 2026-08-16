@@ -12,6 +12,7 @@ import Data.Proxy (Proxy (..))
 import qualified Data.Text as T
 import TypedQL.Algebra
 import TypedQL.Expr
+import TypedQL.Frontend.Dynamic
 import TypedQL.Frontend.Static (sql)
 import TypedQL.Row
 import TypedQL.Schema
@@ -179,6 +180,26 @@ main = do
   putStrLn ("  [sql| SELECT vendor_code FROM vendorsQ WHERE defeitos = 17 |]")
   putStrLn ("  vira (SQL): " ++ renderSQL planoNum)
   putStrLn ("  Resultado: " ++ show (map (T.unpack . col @"vendor_code") (eval (compile planoNum))))
+
+  putStrLn ""
+  putStrLn "--- modulo 6: Frontend.Dynamic ---"
+  putStrLn ""
+  putStrLn "O mesmo SQL, mas como string de runtime. O tipo do resultado e desconhecido"
+  putStrLn "em compile time; erros de nome de coluna so aparecem em runtime, como Left."
+  putStrLn ""
+  let simples = SomeTable (schemaSing @Vendors) tabelaVendors
+      reg = [("vendors", simples)]
+  case runDynSQL reg "SELECT vendor_code, open_rate FROM vendors WHERE defeitos = 7" of
+    Left err -> putStrLn ("Erro: " ++ err)
+    Right res -> do
+      putStrLn "  SQL: SELECT vendor_code, open_rate FROM vendors WHERE defeitos = 7"
+      putStrLn ("  Cabecalho: " ++ show (map (\(n,_,_)->n) (dynHeader res)))
+      putStrLn ("  Linhas (" ++ show (dynRowCount res) ++ "):")
+      mapM_ (\row -> putStrLn ("    " ++ show row)) (dynRows res)
+  putStrLn ""
+  case runDynSQL reg "SELECT taxa FROM vendors" of
+    Left err -> putStrLn ("Coluna inexistente -> Left: " ++ err)
+    Right _  -> putStrLn "ERRO: deveria ter falhado"
 
 mostraColuna :: (String, SqlType, Nullability) -> IO ()
 mostraColuna (nome, tipo, nulabilidade) =

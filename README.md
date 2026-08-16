@@ -48,9 +48,12 @@ esperada (um import errado tambem faria a compilacao falhar). Saida atual:
 [OK] ProjecaoSqlInexistente.hs    TypedQL: a coluna "taxa" nao existe neste
                                   esquema. (via quasiquoter: o SQL gera project
                                   @'["taxa"] e o GHC rejeita.)
+[OK] AcessoColunaDoExistencial.hs Could not deduce ... ColumnOf "vendor_code" s
+                                  ~ T.Text (s e universal no withSomeTable;
+                                  acesso tipado por nome exige esquema concreto.)
 ```
 
-9 de 9 rejeitados corretamente.
+10 de 10 rejeitados corretamente.
 
 ## Estado
 
@@ -59,6 +62,6 @@ esperada (um import errado tambem faria a compilacao falhar). Saida atual:
 - [x] Modulo 3: Expr (expressoes tipadas, nulabilidade calculada, WHERE total)
 - [x] Modulo 4: Algebra (algebra relacional com estagios)
 - [x] Modulo 5: Frontend estatico (quasiquoter [sql| ... |] que gera a consulta tipada em compile time)
-- [ ] Modulo 6: Frontend dinamico (existenciais e singletons)
+- [x] Modulo 6: Frontend dinamico (existencial SomeTable/SomeResult, singleton All Show s, runDynSQL)
 - [ ] Modulo 7: Optimize (catamorfismo)
 - [ ] Modulo 8: Engine (executor indexado)

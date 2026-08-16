@@ -23,6 +23,7 @@ ESPERADO = {
     "LeituraNulavelSemMaybe.hs": "Maybe Text",
     "EvalSemCompilar.hs": "ainda nao foi compilada",
     "ProjecaoSqlInexistente.hs": "nao existe neste esquema",
+    "AcessoColunaDoExistencial.hs": "ColumnOf",
 }
 
 
