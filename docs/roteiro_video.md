@@ -114,7 +114,8 @@ do modulo 8.
 
 ## Notas de gravacao
 
-- Falar devagar; o texto acima tem cerca de 430 palavras, o que da os 180s. Se
+- As falas somam 388 palavras: cerca de 161s a um ritmo normal de 145 palavras
+  por minuto, deixando uns 19s de folga para pausas e para as acoes na tela. Se
   estourar, cortar a secao 0:20-0:45 (o `stack test`) e citar o numero de cabeca.
 - Nao gravar o build a frio: leva 4 minutos.
 - Se o terminal ficar apertado, compilar os negativos pelo script
