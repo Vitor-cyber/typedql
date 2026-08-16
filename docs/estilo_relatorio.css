@@ -1,0 +1,33 @@
+@page { size: A4; margin: 13mm 15mm; }
+html { font-size: 9.1pt; }
+body { font-family: "Segoe UI", Calibri, sans-serif; line-height: 1.26;
+       color: #16181d; margin: 0; text-align: left; hyphens: none; }
+h1 { font-size: 15pt; margin: 0 0 1mm 0; line-height: 1.15;
+     letter-spacing: -0.01em; color: #0b0d12; }
+h1 + p { margin: 0 0 3mm 0; font-size: 8.6pt; color: #5a616e;
+         border-bottom: 0.6pt solid #d4d8e0; padding-bottom: 2mm;
+         letter-spacing: 0.02em; }
+h2 { font-size: 10pt; margin: 3.4mm 0 1.2mm 0; color: #0b0d12;
+     letter-spacing: -0.005em; }
+p { margin: 0 0 1.6mm 0; }
+strong { color: #0b0d12; }
+code { font-family: Consolas, monospace; font-size: 8.3pt;
+       background: #f2f4f8; padding: 0 0.5mm; border-radius: 1.5px; }
+table { border-collapse: collapse; width: 100%; margin: 1.4mm 0 2.2mm 0;
+        font-size: 8.4pt; table-layout: fixed; }
+/* Camada estreita, Modulo medio, Ideia larga: evita buracos na coluna longa. */
+th:nth-child(1), td:nth-child(1) { width: 13%; }
+th:nth-child(2), td:nth-child(2) { width: 25%; }
+th { text-align: left; border-bottom: 0.8pt solid #16181d; padding: 0.9mm 1.6mm 0.9mm 0;
+     font-weight: 600; }
+td { border-bottom: 0.4pt solid #e3e6ec; padding: 0.9mm 1.6mm 0.9mm 0;
+     vertical-align: top; text-align: left; hyphens: none; }
+td code { font-size: 7.9pt; }
+blockquote { margin: 1.4mm 0 1.8mm 3mm; padding-left: 2.6mm;
+             border-left: 1.6pt solid #b9c0cc; color: #454b57;
+             font-family: Consolas, monospace; font-size: 8pt;
+             line-height: 1.42; text-align: left; }
+blockquote p { margin: 0; }
+ul { margin: 1.2mm 0 1.8mm 0; padding-left: 4.6mm; }
+li { margin-bottom: 1.1mm; }
+h2:last-of-type + p { margin-top: 1mm; }
