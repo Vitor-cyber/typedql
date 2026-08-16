@@ -3,7 +3,7 @@ version:             0.1.0.0
 synopsis:            SGBD relacional embarcado com esquema no nivel de tipos
 description:         Projeto da disciplina Desenvolvimento Orientado a Tipos (UFABC).
 author:              Vitor Martins Bueno Lima
-maintainer:          marvitox@users.noreply.github.com
+maintainer:          Vitor-cyber@users.noreply.github.com
 license:             BSD-3-Clause
 category:            Database
 

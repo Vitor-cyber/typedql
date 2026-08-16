@@ -6,7 +6,7 @@ esquerda, VS Code a direita. Fonte do terminal em 16pt no minimo.
 ## Preparar antes de gravar
 
 ```
-cd C:\Users\marvitox\Documents\typedql
+cd <pasta do repositorio>
 ```
 
 Deixar abertos em abas do VS Code, nesta ordem:
